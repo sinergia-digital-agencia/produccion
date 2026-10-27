@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#591D33">
+<title>Producción — Sinergia Digital</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --vino:#591D33;--vino-mid:#7a2845;--vino-light:#f9f0f3;--lila:#D6BBF2;--lemon:#F6FFA1;--azul:#93A2FD;--terra:#BF4F26;
+  --bg:#f4f1f2;--surface:#fff;--surface2:#f8f5f6;--text:#1a1010;--text2:#6b5057;--text3:#9e8089;
+  --border:#ede0e3;--border2:#d9c8cc;--r:10px;--rs:7px;--rl:14px;
+}
+body{font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px;color:var(--text);background:var(--bg);min-height:100vh}
+[hidden]{display:none!important}
+button{font-family:inherit;cursor:pointer}
+.topbar{background:var(--vino);color:#fff;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-logo{width:32px;height:32px;background:rgba(255,255,255,.15);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.brand b{font-size:15px;display:block;line-height:1.1}.brand small{font-size:11px;opacity:.65}
+.top-right{display:flex;align-items:center;gap:12px;font-size:12px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#4ade80;margin-right:5px}
+.dot.err{background:#f87171}.dot.sync{background:#fbbf24}
+.nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav button{padding:12px 14px;border:none;background:transparent;border-bottom:2px solid transparent;font-size:13px;color:var(--text2);display:flex;align-items:center;gap:6px;white-space:nowrap;font-weight:500}
+.nav button.on{color:var(--vino);border-bottom-color:var(--vino);background:var(--vino-light)}
+.content{padding:18px;max-width:1200px;margin:0 auto}
+h2{font-size:18px;font-weight:600;letter-spacing:-.02em}
+.head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:16px 18px;margin-bottom:14px}
+.sub{color:var(--text3);font-size:12px}
+.btn{padding:8px 14px;border:1px solid var(--border2);border-radius:var(--rs);background:var(--surface);color:var(--text);font-size:13px;display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.btn:hover{background:var(--surface2)}
+.btn.p{background:var(--vino);border-color:var(--vino);color:#fff}.btn.p:hover{background:var(--vino-mid)}
+.btn.d{background:#fbe9e3;border-color:#f0c4b3;color:#8a3516}
+.btn.sm{padding:5px 10px;font-size:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select,input,textarea{padding:8px 10px;border:1px solid var(--border2);border-radius:var(--rs);background:#fff;color:var(--text);font-size:13px;font-family:inherit;max-width:100%}
+select:focus,input:focus,textarea:focus{outline:none;border-color:var(--vino);box-shadow:0 0 0 3px rgba(89,29,51,.1)}
+label.l{display:block;font-size:12px;font-weight:600;color:var(--text2);margin:10px 0 4px}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.b-pend{background:#f1ecee;color:#6b5057}.b-curso{background:#e3e7ff;color:#2d3a9e}.b-rev{background:#ede5fb;color:#3d2070}
+.b-cambios{background:#f9dfd3;color:#8a3516}.b-listo{background:#d4edda;color:#155724}.b-vino{background:var(--vino-light);color:var(--vino)}
+.b-azul{background:#e3e7ff;color:#2d3a9e}
+.empty{text-align:center;color:var(--text3);padding:26px 10px;font-size:13px}
+.alert{padding:10px 14px;border-radius:var(--rs);font-size:13px;margin-bottom:10px;border-left:3px solid}
+.alert.w{background:#fff8d6;border-color:#e6c200;color:#6b5600}.alert.r{background:#fbe9e3;border-color:var(--terra);color:#8a3516}.alert.g{background:#e4f5e8;border-color:#28a745;color:#155724}.alert.i{background:#eef0ff;border-color:var(--azul);color:#2d3a9e}
+/* calendario */
+.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.day{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:8px;min-height:120px}
+.day.hoy{border-color:var(--vino);box-shadow:0 0 0 2px rgba(89,29,51,.12)}
+.day.we{background:var(--surface2)}
+.day h4{font-size:12px;color:var(--text2);margin-bottom:6px;font-weight:600}
+.task{border:1px solid var(--border);border-left:4px solid var(--border2);border-radius:var(--rs);padding:6px 8px;margin-bottom:6px;cursor:pointer;background:#fff;font-size:12px}
+.task:hover{background:var(--surface2)}
+.task b{display:block;font-size:12px}.task span{color:var(--text3);display:block}
+.t-pend{border-left-color:#bdaab0}.t-curso{border-left-color:var(--azul)}.t-rev{border-left-color:var(--lila)}.t-cambios{border-left-color:var(--terra)}.t-listo{border-left-color:#28a745;opacity:.65}
+.task.late{background:#fff3ef}
+/* carga */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th,.tbl td{padding:9px 10px;border-bottom:1px solid var(--border);text-align:center}
+.tbl th{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;background:var(--surface2)}
+.tbl td:first-child,.tbl th:first-child{text-align:left;font-weight:600}
+.cg-ok{background:#d4edda;color:#155724}.cg-warn{background:var(--lemon);color:#5c4a00}.cg-over{background:#f3c5b3;color:#8a3516;font-weight:700}.cg-na{background:#f5f5f5;color:#6b5057}
+.cg small{opacity:.7;font-weight:400}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.check-grid label{display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--rs);font-size:13px;cursor:pointer}
+.check-grid label input{width:16px;height:16px;padding:0;accent-color:var(--vino)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
+.chk input{width:16px;height:16px;padding:0;accent-color:var(--vino)}
+.modal .chk input{width:16px}
+.prog{height:6px;background:var(--border);border-radius:4px;overflow:hidden;margin:8px 0}
+.prog i{display:block;height:100%;background:#28a745}
+/* modal */
+.overlay{display:none;position:fixed;inset:0;background:rgba(89,29,51,.42);z-index:200;align-items:center;justify-content:center;padding:16px;overflow-y:auto}
+.overlay.open{display:flex}
+.modal{background:#fff;border-radius:var(--rl);padding:20px;width:100%;max-width:460px;max-height:92vh;overflow-y:auto}
+.modal h3{font-size:16px;margin-bottom:2px}
+.modal .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.modal select,.modal input,.modal textarea{width:100%}
+.steps{margin-top:10px;display:flex;flex-direction:column;gap:4px;font-size:12px}
+.steps div{display:flex;justify-content:space-between;gap:8px;padding:4px 8px;background:var(--surface2);border-radius:5px}
+/* login */
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--vino)}
+.login .box{background:#fff;border-radius:var(--rl);padding:28px;width:100%;max-width:360px;text-align:center}
+.login h1{font-size:20px;color:var(--vino);margin-bottom:4px}
+.login input{width:100%;margin:14px 0 10px;text-align:center;font-size:16px}
+.login .err{color:#8a3516;font-size:12px;min-height:16px;margin-bottom:8px}
+.loading{position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:300;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-weight:600;color:var(--vino)}
+.spin{width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--vino);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.b-warn{background:var(--lemon);color:#5c4a00}.b-over{background:#f9dfd3;color:#8a3516}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:#fff;border:1px solid var(--border);border-left:4px solid var(--border2);border-radius:var(--r);padding:12px 14px}
+.kpi small{display:block;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.kpi b{font-size:24px;letter-spacing:-.02em;display:block;margin:2px 0}.kpi span{display:block;font-size:11px;color:var(--text3)}
+.kpi.ok{border-left-color:#28a745}.kpi.warn{border-left-color:#e6c200}.kpi.over{border-left-color:var(--terra)}
+.tbl.tb th,.tbl.tb td{text-align:left;vertical-align:top}.tbl.tb td.free{background:var(--lemon);color:#5c4a00;font-style:italic}.tbl.tb td.bad{background:#f9dfd3}
+.chipc{display:inline-block;background:var(--vino-light);color:var(--vino);border-radius:12px;padding:2px 9px;margin:2px;font-size:12px;font-weight:600}
+.phase-chips{display:flex;gap:6px;flex-wrap:wrap}.pchip{border:1px solid var(--border2);background:#fff;border-radius:20px;padding:5px 12px;font-size:12px;color:var(--text)}.pchip:hover{background:var(--surface2)}.pchip.on{background:var(--vino);color:#fff;border-color:var(--vino)}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--text2);margin-bottom:4px}.legend .lg{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.lchip{border:1px solid var(--border);border-left:4px solid var(--border2);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;background:#fff}.lchip:hover{background:var(--surface2)}
+.guia{background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:10px 12px;margin-top:12px;font-size:12px}.guia ul{margin:6px 0 0 16px}.guia li{margin-bottom:3px}
+@media(max-width:900px){
+  .week{grid-template-columns:1fr}.day{min-height:0}
+  .content{padding:12px}.topbar{padding:0 12px}.top-right .hide-m{display:none}
+  .overlay{align-items:flex-end;padding:0}.modal{border-radius:var(--rl) var(--rl) 0 0;max-width:100%}
+  input,select,textarea{font-size:16px}
+}
+</style>
+</head>
+<body>
+
+<div class="login" id="login">
+  <div class="box">
+    <div style="font-size:34px;color:var(--vino)"><i class="ti ti-calendar-event"></i></div>
+    <h1>Producción · Sinergia Digital</h1>
+    <p class="sub">Ingresa el código del equipo</p>
+    <input type="password" id="code" placeholder="Código" autocomplete="off">
+    <div class="err" id="login-err"></div>
+    <button class="btn p" style="width:100%;justify-content:center" data-act="entrar">Entrar</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand"><div class="brand-logo"><i class="ti ti-calendar-event"></i></div><div><b>Producción</b><small>Sinergia Digital</small></div></div>
+    <div class="top-right"><span><span class="dot" id="dot"></span><span id="estado-sync">Sincronizado</span></span><span class="hide-m" id="hoy-label"></span><a class="btn sm" id="manual" target="_blank" rel="noopener" hidden title="Manual de procesos"><i class="ti ti-book"></i></a><button class="btn sm" data-act="recargar" title="Actualizar"><i class="ti ti-refresh"></i></button><button class="btn sm" data-act="salir" title="Salir"><i class="ti ti-logout"></i></button></div>
+  </header>
+  <nav class="nav" id="nav"></nav>
+  <main class="content" id="main"></main>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="loading" id="loading" hidden><div class="spin"></div><span id="loading-txt">Cargando…</span></div>
+
+<script>
+// ═════════ CONFIG ═════════
+const API = 'https://script.google.com/macros/s/AKfycbzZ7vgrgejhuqKXuL_c629VSNt5mesLlnfnxC_PBDiYfmt0-j1_MY1eMPIe4lE8ohAqGQ/exec';
+
+// ═════════ LÓGICA PURA (turnos, plan, fases, métricas) ═════════
+// <<PURE
+const pad = n => String(n).padStart(2, '0');
+const fmt = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const parse = s => new Date(s + 'T12:00:00');
+const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return fmt(d); };
+const diff = (a, b) => Math.round((parse(b) - parse(a)) / 864e5);
+const lunes = s => { const d = parse(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return fmt(d); };
+const mod = (a, n) => ((a % n) + n) % n;
+// Regla del Sistema de turnos: si una fecha cae en domingo, se adelanta (nunca se atrasa)
+const habil = s => (parse(s).getDay() === 0 ? addDays(s, -1) : s);
+
+// ── Sistema de turnos: el mes tiene 6 turnos de 5 días (el sexto cierra el día 30) ──
+const N_TURNOS = 6, DIAS_TURNO = 5;
+function mesAdd(ym, n) { const p = ym.split('-').map(Number); const t = p[0] * 12 + (p[1] - 1) + n; return Math.floor(t / 12) + '-' + pad(mod(t, 12) + 1); }
+function finMes(ym) { const p = ym.split('-').map(Number); return new Date(p[0], p[1], 0).getDate(); }
+// idx 1..6 = turnos del mes ym · 7..12 = turnos del mes siguiente · 0, -1… = del mes anterior
+function rangoTurno(ym, idx) {
+  const off = Math.floor((idx - 1) / N_TURNOS), k = mod(idx - 1, N_TURNOS) + 1, m = mesAdd(ym, off);
+  const ini = (k - 1) * DIAS_TURNO + 1, fin = k === N_TURNOS ? Math.min(30, finMes(m)) : k * DIAS_TURNO;
+  return { mes: m, k, ini, fin, desde: m + '-' + pad(ini), hasta: m + '-' + pad(fin) };
+}
+function fechaTurno(ym, idx, dia) { const r = rangoTurno(ym, idx); return r.mes + '-' + pad(dia >= DIAS_TURNO ? r.fin : Math.min(r.ini + dia - 1, r.fin)); }
+
+const tandasDe = (piezas, porTurno) => Math.max(1, Math.ceil((parseInt(piezas) || 0) / (parseInt(porTurno) || 25)));
+const piezasTanda = (piezas, tandas, j) => { piezas = parseInt(piezas) || 0; return Math.floor(piezas / tandas) + (j <= piezas % tandas ? 1 : 0); };
+const piezasPrevias = (piezas, tandas, j) => { let s = 0; for (let i = 1; i < j; i++) s += piezasTanda(piezas, tandas, i); return s; };
+
+function asignar(rol, equipo) {
+  if (rol === 'cliente') return 'Cliente';
+  const p = equipo.find(x => x.activo !== 'NO' && String(x.roles || '').split(',').map(r => r.trim()).includes(rol));
+  return p ? p.nombre : '';
+}
+
+// Un "lote" = lo que se produce para un cliente en una tanda: escritura → grabación → edición → entrega.
+// o: {ym, turno, tanda, tandas, piezas, incluye[], etapas[], equipo[], investigacion}
+function generarLote(o) {
+  const tandas = o.tandas || 1, j = o.tanda || 1;
+  const n = piezasTanda(o.piezas, tandas, j), off = piezasPrevias(o.piezas, tandas, j);
+  if (n < 1 || !o.turno) return [];
+  const w = o.turno + (j - 1);
+  const etapas = o.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0))
+    .filter(e => !(e.requiere && !o.incluye.includes(e.requiere)) && !(e.excluye && o.incluye.includes(e.excluye)));
+  const out = [];
+  etapas.forEach(e => {
+    const alc = e.alcance || 'pieza';
+    if (alc === 'cliente' && !o.investigacion) return;
+    const idx = w + (parseInt(e.turnoRel) || 0), d1 = parseInt(e.dia) || 1, d2 = parseInt(e.diaFin) || d1;
+    const horas = parseFloat(e.horas) || 0, resp = asignar(e.rol, o.equipo);
+    const mk = (pieza, dia) => out.push({ pieza: String(pieza), etapa: e.key, etapaNombre: e.nombre, fecha: habil(fechaTurno(o.ym, idx, dia)), responsable: resp, horas });
+    if (alc === 'pieza') { const span = d2 - d1 + 1; for (let i = 1; i <= n; i++) mk(off + i, d1 + Math.floor((i - 1) * span / n)); }
+    else mk(0, d2);
+  });
+  return out;
+}
+
+// Fechas fijas que se le comunican al cliente (anexo del contrato)
+function fechasFijas(ym, w) {
+  const e = rangoTurno(ym, w), g = rangoTurno(ym, w + 1), d = rangoTurno(ym, w + 2);
+  return { guiones: e.hasta, aprueba: [g.desde, fechaTurno(ym, w + 1, 2)], graba: [fechaTurno(ym, w + 1, 3), fechaTurno(ym, w + 1, 4)], material: g.hasta, contenido: d.hasta };
+}
+// items: [{nombre, turno (escritura), tandas}] → qué pasa en cada turno del mes (régimen continuo)
+function tablero(items) {
+  const t = [1, 2, 3, 4, 5, 6].map(() => ({ escribe: [], graba: [], edita: [], entrega: [] }));
+  items.forEach(c => {
+    if (!c.turno) return;
+    for (let j = 1; j <= c.tandas; j++) {
+      const w = c.turno + j - 1, nom = c.nombre + (c.tandas > 1 ? ', tanda ' + j : '');
+      [[0, 'escribe'], [1, 'graba'], [2, 'edita'], [2, 'entrega']].forEach(p => {
+        [w + p[0], w + p[0] - N_TURNOS].forEach(x => { if (x >= 1 && x <= N_TURNOS) t[x - 1][p[1]].push(nom); });
+      });
+    }
+  });
+  return t;
+}
+function ocupacion(items) {
+  const occ = {};
+  items.forEach(c => { if (!c.turno) return; for (let j = 0; j < c.tandas; j++) { const s = mod(c.turno - 1 + j, N_TURNOS) + 1; (occ[s] = occ[s] || []).push(c.nombre); } });
+  return occ;
+}
+function primerHueco(items, tandasNec) {
+  const occ = ocupacion(items);
+  for (let s = 1; s <= N_TURNOS; s++) { let libre = true; for (let j = 0; j < tandasNec; j++) if (occ[mod(s - 1 + j, N_TURNOS) + 1]) libre = false; if (libre) return s; }
+  return 0;
+}
+
+// ── Lotes, fases de cada pieza y métricas del mes ──
+const LOTE_RE = /^\d{4}-\d{2}-\d+$/;
+function lotes(tareas) {
+  const m = {};
+  tareas.forEach(t => {
+    if (!LOTE_RE.test(t.ciclo)) return;
+    const k = t.clienteId + '|' + t.ciclo;
+    (m[k] = m[k] || { clienteId: t.clienteId, cliente: t.cliente, ciclo: t.ciclo, tareas: [] }).tareas.push(t);
+  });
+  return Object.values(m).map(l => {
+    l.lote = {}; l.piezas = {};
+    l.tareas.forEach(t => { if (t.pieza === '0') l.lote[t.etapa] = t; else (l.piezas[t.pieza] = l.piezas[t.pieza] || {})[t.etapa] = t; });
+    l.n = Object.keys(l.piezas).length;
+    return l;
+  });
+}
+const FASES = ['En guionización', 'Guion en revisión del cliente', 'Esperando grabación o material', 'En edición', 'En control de calidad', 'Requiere actualización', 'Listo para entregar', 'En revisión del cliente', 'Reenviado a revisión', 'Aprobado por el cliente', 'Completada'];
+function faseDe(p, L) {
+  const ok = t => t && t.estado === 'Listo';
+  const rv = p.revvideo, ed = p.edicion, ca = p.calidad;
+  if (ok(rv)) return 'Aprobado por el cliente';
+  if ((rv && rv.estado === 'Con cambios') || (ca && ca.estado === 'Con cambios') || (ed && ed.estado === 'Con cambios')) return 'Requiere actualización';
+  if (rv && rv.estado === 'En revisión') return (parseInt(rv.rondas) || 0) > 0 ? 'Reenviado a revisión' : 'En revisión del cliente';
+  if (p.guion && !ok(p.guion)) return 'En guionización';
+  if (L.aprobguion && !ok(L.aprobguion)) return 'Guion en revisión del cliente';
+  if ((L.material && !ok(L.material)) || (L.grabacion && !ok(L.grabacion))) return 'Esperando grabación o material';
+  if (ed && !ok(ed)) return 'En edición';
+  if (ca && !ok(ca)) return 'En control de calidad';
+  if (L.entrega && !ok(L.entrega)) return 'Listo para entregar';
+  if (rv) return 'En revisión del cliente';
+  return 'Completada';
+}
+const fechaEntrega = l => { const t = l.lote.entrega || l.lote.envioguion; if (t) return t.fecha; const f = l.tareas.map(x => x.fecha).sort(); return f[f.length - 1] || ''; };
+const atrasadasDe = (l, hoy) => l.tareas.filter(t => t.estado !== 'Listo' && t.responsable !== 'Cliente' && t.fecha < hoy).length;
+const atrasosCliente = (l, hoy) => l.tareas.filter(t => t.estado !== 'Listo' && t.responsable === 'Cliente' && t.fecha < hoy).length;
+
+function resumenMes(ym, tareas, extras, hoy) {
+  const ls = lotes(tareas).filter(l => fechaEntrega(l).slice(0, 7) === ym);
+  const r = { lotes: ls, plan: 0, entregadas: 0, aprobadas: 0, aTiempo: null, rondas: null, atrasadas: 0, extras: (extras || []).filter(x => String(x.fecha).slice(0, 7) === ym).length };
+  let ent = 0, entOk = 0; const rs = [];
+  ls.forEach(l => {
+    r.plan += l.n;
+    const e = l.lote.entrega || l.lote.envioguion;
+    if (e && e.estado === 'Listo') { r.entregadas += l.n; if (e.fechaListo) { ent++; if (e.fechaListo <= e.fecha) entOk++; } }
+    Object.values(l.piezas).forEach(p => { if (p.revvideo) { if (p.revvideo.estado === 'Listo') r.aprobadas++; if (p.revvideo.estado !== 'Pendiente') rs.push(parseInt(p.revvideo.rondas) || 0); } });
+    r.atrasadas += atrasadasDe(l, hoy);
+  });
+  r.aTiempo = ent ? Math.round(entOk / ent * 100) : null;
+  r.rondas = rs.length ? Math.round(rs.reduce((a, b) => a + b, 0) / rs.length * 100) / 100 : null;
+  return r;
+}
+function burnup(ym, ls, hoy) {
+  const n = finMes(ym), plan = [], real = [];
+  for (let d = 1; d <= n; d++) {
+    const f = ym + '-' + pad(d); let p = 0, rr = 0;
+    ls.forEach(l => { const e = l.lote.entrega || l.lote.envioguion; if (!e) return; if (e.fecha <= f) p += l.n; if (e.estado === 'Listo' && (e.fechaListo || e.fecha) <= f) rr += l.n; });
+    plan.push(p); real.push(f <= hoy ? rr : null);
+  }
+  return { plan, real, n };
+}
+// Horas por persona y semana (las tareas del cliente no cargan al equipo)
+function cargaHoras(tareas, equipo, semanas, soloPendientes) {
+  const filas = {};
+  equipo.filter(p => p.activo !== 'NO').forEach(p => { filas[p.nombre] = semanas.map(() => 0); });
+  tareas.forEach(t => {
+    if (t.responsable === 'Cliente' || (soloPendientes && t.estado === 'Listo')) return;
+    const h = parseFloat(t.horas) || 0; if (!h) return;
+    const k = t.responsable || 'Sin asignar';
+    const i = (soloPendientes && t.fecha < semanas[0]) ? 0 : Math.floor(diff(semanas[0], lunes(t.fecha)) / 7);
+    if (i < 0 || i >= semanas.length) return;
+    if (!filas[k]) filas[k] = semanas.map(() => 0);
+    filas[k][i] += h;
+  });
+  Object.keys(filas).forEach(k => { filas[k] = filas[k].map(x => Math.round(x * 10) / 10); });
+  return filas;
+}
+function nivel(n, cap) { if (!cap) return 'na'; const r = n / cap; return r > 1 ? 'over' : (r > 0.7 ? 'warn' : 'ok'); }
+// PURE>>
+
+// ═════════ ESTADO ═════════
+const ESTADOS = ['Pendiente', 'En curso', 'En revisión', 'Con cambios', 'Listo'];
+const SLUG = { 'Pendiente': 'pend', 'En curso': 'curso', 'En revisión': 'rev', 'Con cambios': 'cambios', 'Listo': 'listo' };
+const SERV = { guion: 'Guionización', grabacion: 'Grabación', edicion: 'Edición', trafico: 'Tráfico', crm: 'Implementación de CRM', manychat: 'ManyChat', web: 'Sitio web' };
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const MESES_L = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const FASE_CLASE = { 'En guionización': 'curso', 'Guion en revisión del cliente': 'rev', 'Esperando grabación o material': 'pend', 'En edición': 'curso', 'En control de calidad': 'rev', 'Requiere actualización': 'cambios', 'Listo para entregar': 'azul', 'En revisión del cliente': 'rev', 'Reenviado a revisión': 'rev', 'Aprobado por el cliente': 'listo', 'Completada': 'listo' };
+let S = { equipo: [], etapas: [], tareas: [], clientes: [], cronograma: [], extras: [], config: {}, hoy: '' };
+let CODE = '', YO = '', view = 'dashboard', mes = '', semOff = 0, fP = '', fC = '', pFase = '', pCli = '', genCtx = null, ctxCli = null;
+let sim = { piezas: 20, incl: ['guion', 'edicion'], res: null };
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const corta = s => { const d = parse(s); return DIAS[d.getDay()] + ' ' + d.getDate() + ' ' + MESES[d.getMonth()]; };
+const dm = s => { const d = parse(s); return d.getDate() + ' ' + MESES[d.getMonth()]; };
+const mesLabel = ym => MESES_L[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
+const diaTxt = (f, ym) => (+f.slice(8)) + (f.slice(0, 7) !== ym ? ' ' + MESES[+f.slice(5, 7) - 1] : '');
+const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+const lsSet = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} };
+const setSync = (st, txt) => { $('dot').className = 'dot' + (st === 'err' ? ' err' : st === 'sync' ? ' sync' : ''); $('estado-sync').textContent = txt; };
+const loading = (on, t) => { $('loading').hidden = !on; if (t) $('loading-txt').textContent = t; };
+const porTurno = () => parseInt(S.config.piezasPorTurno) || 25;
+const rondasMax = () => { const v = parseInt(S.config.rondasMax); return isNaN(v) ? 1 : v; };
+const capOf = n => { const p = S.equipo.find(x => x.nombre === n); return p ? (parseFloat(p.horasSemana) || 0) : 0; };
+const checklistItems = () => String(S.config.checklist || '').split('|').map(s => s.trim()).filter(Boolean);
+const marcados = t => String(t.checklist || '').split('|').filter(Boolean);
+const activos = () => S.clientes.filter(c => c.estado === 'Activo');
+const cronoDe = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { turno: parseInt(r.turno) || 0, aprobador: r.aprobador || '', notas: r.notas || '' }; };
+const itemsTurnos = () => activos().filter(c => cronoDe(c.id).turno && c.piezas > 0).map(c => ({ id: c.id, nombre: c.nombre, turno: cronoDe(c.id).turno, tandas: tandasDe(c.piezas, porTurno()) }));
+const nombreRol = rol => asignar(rol, S.equipo) || '';
+const semanasVista = () => [0, 1, 2, 3, 4, 5].map(i => addDays(lunes(S.hoy), i * 7));
+function semanasDelMes(ym) { const w = []; let s = lunes(ym + '-01'); const fin = ym + '-' + pad(finMes(ym)); while (s <= fin) { w.push(s); s = addDays(s, 7); } return w; }
+
+// ═════════ API ═════════
+async function api(action, params) {
+  if (API.indexOf('PEGA_AQUI') === 0) throw new Error('Falta pegar la URL del Apps Script en la constante API del index.html');
+  const u = new URL(API);
+  u.searchParams.set('action', action);
+  u.searchParams.set('code', CODE);
+  Object.keys(params || {}).forEach(k => { const v = params[k]; u.searchParams.set(k, typeof v === 'string' ? v : JSON.stringify(v)); });
+  const r = await fetch(u.toString());
+  return r.json();
+}
+async function cargar() {
+  setSync('sync', 'Sincronizando…');
+  const r = await api('getAll');
+  if (!r.ok) throw new Error(r.error === 'codigo' ? 'Código incorrecto' : (r.error || 'Error al leer datos'));
+  S = { equipo: r.equipo || [], etapas: r.etapas || [], tareas: r.tareas || [], clientes: r.clientes || [], cronograma: r.cronograma || [], extras: r.extras || [], config: r.config || {}, hoy: r.hoy };
+  setSync('ok', 'Sincronizado');
+  const a = $('manual'); if (a) { a.hidden = !S.config.manualUrl; if (S.config.manualUrl) a.href = S.config.manualUrl; }
+}
+async function entrar(c) {
+  CODE = c;
+  try {
+    await cargar();
+    lsSet('prod_code', c);
+    $('login').hidden = true; $('app').hidden = false;
+    $('hoy-label').textContent = corta(S.hoy);
+    if (!mes) mes = S.hoy.slice(0, 7);
+    if (!sim.inicio) sim.inicio = S.hoy;
+    YO = lsGet('prod_yo');
+    nav(); render();
+  } catch (e) {
+    CODE = ''; lsSet('prod_code', '');
+    $('login').hidden = false; $('app').hidden = true;
+    $('login-err').textContent = e.message;
+  }
+}
+
+// ═════════ NAVEGACIÓN ═════════
+const VISTAS = [['dashboard', 'ti-layout-dashboard', 'Dashboard'], ['turnos', 'ti-layout-columns', 'Turnos'], ['calendario', 'ti-calendar-week', 'Calendario'], ['mis', 'ti-user-check', 'Mis tareas'], ['piezas', 'ti-movie', 'Piezas'], ['carga', 'ti-chart-bar', 'Carga'], ['clientes', 'ti-users', 'Clientes'], ['simulador', 'ti-flask', 'Simulador'], ['ajustes', 'ti-settings', 'Ajustes']];
+function nav() {
+  $('nav').innerHTML = VISTAS.map(v => '<button class="' + (view === v[0] ? 'on' : '') + '" data-act="nav" data-v="' + v[0] + '"><i class="ti ' + v[1] + '"></i>' + v[2] + '</button>').join('');
+}
+function render() {
+  nav();
+  const f = { dashboard: vDashboard, turnos: vTurnos, calendario: vCalendario, mis: vMis, piezas: vPiezas, carga: vCarga, clientes: vClientes, simulador: vSimulador, ajustes: vAjustes }[view];
+  $('main').innerHTML = f();
+}
+
+// ═════════ COMPONENTES ═════════
+const loteLabel = l => { const c = S.clientes.find(x => x.id === l.clienteId); const j = l.ciclo.split('-')[2]; return l.cliente + (c && tandasDe(c.piezas, porTurno()) > 1 ? ', tanda ' + j : ''); };
+function htmlTablero(items) {
+  const tb = tablero(items);
+  const celda = (arr, libre) => '<td' + (arr.length > 1 ? ' class="bad"' : (!arr.length && libre ? ' class="free"' : '')) + '>' + (arr.length ? arr.map(n => '<span class="chipc">' + esc(n) + '</span>').join('') : (libre ? libre : '<span class="sub">—</span>')) + '</td>';
+  let h = '<div class="scroll"><table class="tbl tb"><thead><tr><th>Turno</th><th>' + esc(nombreRol('guion') || 'Guion') + ' escribe</th><th>Cliente graba</th><th>' + esc(nombreRol('edicion') || 'Edición') + ' edita</th><th>Se entrega</th></tr></thead><tbody>';
+  for (let k = 1; k <= N_TURNOS; k++) {
+    const r = rangoTurno('2000-01', k);
+    h += '<tr><td><b>T' + k + '</b><br><span class="sub">días ' + r.ini + ' a ' + r.fin + '</span></td>' + celda(tb[k - 1].escribe, 'Turno libre') + celda(tb[k - 1].graba, 'libre') + celda(tb[k - 1].edita, 'libre') + celda(tb[k - 1].entrega, '') + '</tr>';
+  }
+  return h + '</tbody></table></div>';
+}
+function filasFijas(items) {
+  const f = [];
+  items.forEach(c => { for (let j = 1; j <= c.tandas; j++) f.push({ nombre: c.nombre + (c.tandas > 1 ? ', tanda ' + j : ''), w: c.turno + j - 1 }); });
+  const hueco = primerHueco(items, 1);
+  if (hueco) f.push({ nombre: 'Cliente nuevo (turno libre T' + hueco + ')', w: hueco });
+  return f;
+}
+function htmlFijas(ym, filas) {
+  let h = '<div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Recibe guiones</th><th>Aprueba</th><th>Graba</th><th>Entrega material</th><th>Recibe contenido</th></tr></thead><tbody>';
+  filas.forEach(f => {
+    const x = fechasFijas(ym, f.w);
+    h += '<tr><td><b>' + esc(f.nombre) + '</b></td><td>día ' + diaTxt(x.guiones, ym) + '</td><td>' + diaTxt(x.aprueba[0], ym) + ' y ' + diaTxt(x.aprueba[1], ym) + '</td><td>' + diaTxt(x.graba[0], ym) + ' y ' + diaTxt(x.graba[1], ym) + '</td><td>día ' + diaTxt(x.material, ym) + '</td><td>día ' + diaTxt(x.contenido, ym) + '</td></tr>';
+  });
+  return h + '</tbody></table></div>';
+}
+function tablaHoras(filas, semanas, primera) {
+  const nombres = Object.keys(filas).filter(n => n !== 'Sin asignar' && (capOf(n) || filas[n].some(x => x))).concat(filas['Sin asignar'] && filas['Sin asignar'].some(x => x) ? ['Sin asignar'] : []);
+  let h = '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th>' + semanas.map((s, i) => '<th>' + (i === 0 && primera ? primera : 'sem. ' + dm(s)) + '</th>').join('') + '</tr></thead><tbody>';
+  nombres.forEach(n => {
+    const cap = capOf(n);
+    h += '<tr><td>' + esc(n) + '<br><span class="sub">' + (cap ? cap + ' h por semana' : 'sin horas definidas') + '</span></td>' + semanas.map((s, i) => { const v = filas[n][i] || 0; return '<td class="cg cg-' + nivel(v, cap) + '">' + v + ' h' + (cap ? '<small> / ' + cap + '</small>' : '') + '</td>'; }).join('') + '</tr>';
+  });
+  return h + '</tbody></table></div>';
+}
+function sobrecargas(filas, semanas) {
+  const out = [];
+  Object.keys(filas).forEach(n => { const cap = capOf(n); if (!cap) return; semanas.forEach((s, i) => { if (filas[n][i] > cap) out.push({ n, i, tot: filas[n][i], cap, s }); }); });
+  return out;
+}
+function svgBurnup(bu, ym, hoy) {
+  const W = 640, H = 230, L = 40, R = 14, T = 14, B = 28;
+  const max = Math.max(1, ...bu.plan, ...bu.real.filter(v => v !== null));
+  const x = i => L + (W - L - R) * (i / Math.max(1, bu.n - 1)), y = v => T + (H - T - B) * (1 - v / max);
+  const path = arr => { let d = '', pen = false; arr.forEach((v, i) => { if (v === null) { pen = false; return; } d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' '; pen = true; }); return d; };
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Piezas entregadas contra lo planificado">';
+  [0, 0.5, 1].forEach(f => { const v = Math.round(max * f); s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="#ede0e3"/><text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" font-size="10" text-anchor="end" fill="#9e8089">' + v + '</text>'; });
+  [1, 5, 10, 15, 20, 25, bu.n].forEach(d => { s += '<text x="' + x(d - 1) + '" y="' + (H - 8) + '" font-size="10" text-anchor="middle" fill="#9e8089">' + d + '</text>'; });
+  if (hoy.slice(0, 7) === ym) { const hx = x(+hoy.slice(8) - 1); s += '<line x1="' + hx + '" x2="' + hx + '" y1="' + T + '" y2="' + (H - B) + '" stroke="#93A2FD" stroke-dasharray="4 3"/><text x="' + hx + '" y="' + (T + 8) + '" font-size="10" fill="#6c7bd9" text-anchor="middle">hoy</text>'; }
+  s += '<path d="' + path(bu.plan) + '" fill="none" stroke="#591D33" stroke-width="2" stroke-dasharray="6 4"/>';
+  s += '<path d="' + path(bu.real) + '" fill="none" stroke="#BF4F26" stroke-width="3"/>';
+  return s + '</svg>';
+}
+const pendientesPipeline = () => { const pip = {}; lotes(S.tareas).forEach(l => Object.values(l.piezas).forEach(p => { const f = faseDe(p, l.lote); pip[f] = (pip[f] || 0) + 1; })); return pip; };
+
+// ═════════ DASHBOARD DEL MES ═════════
+function vDashboard() {
+  const ym = mes, R = resumenMes(ym, S.tareas, S.extras, S.hoy), items = itemsTurnos(), occ = ocupacion(items);
+  const usados = Object.keys(occ).length, libres = [1, 2, 3, 4, 5, 6].filter(s => !occ[s]), todos = lotes(S.tareas), max = rondasMax();
+  const kpi = (cl, t, v, s) => '<div class="kpi ' + cl + '"><small>' + t + '</small><b>' + v + '</b><span>' + s + '</span></div>';
+  let h = '<div class="head"><h2>Dashboard · ' + mesLabel(ym) + '</h2><div class="row"><button class="btn sm" data-act="mes" data-d="-1"><i class="ti ti-chevron-left"></i></button><button class="btn sm" data-act="mes" data-d="0">Este mes</button><button class="btn sm" data-act="mes" data-d="1"><i class="ti ti-chevron-right"></i></button></div></div>';
+  const pct = R.plan ? Math.round(R.entregadas / R.plan * 100) : 0;
+  h += '<div class="kpis">' +
+    kpi(libres.length === 0 ? 'warn' : 'ok', 'Turnos ocupados', usados + ' de ' + N_TURNOS, libres.length ? 'Libre' + (libres.length > 1 ? 's' : '') + ': ' + libres.map(s => 'T' + s).join(', ') : 'Sin turno libre') +
+    kpi('', 'Piezas entregadas', R.entregadas + ' / ' + R.plan, pct + '% de lo que se entrega este mes') +
+    kpi('', 'Aprobadas por el cliente', R.aprobadas + ' / ' + R.plan, 'de las piezas del mes') +
+    kpi(R.aTiempo === null ? '' : (R.aTiempo >= 90 ? 'ok' : (R.aTiempo >= 70 ? 'warn' : 'over')), 'Entregas a tiempo', R.aTiempo === null ? '—' : R.aTiempo + '%', R.aTiempo === null ? 'aún sin entregas' : 'lotes entregados en su fecha') +
+    kpi(R.rondas === null ? '' : (R.rondas <= max ? 'ok' : 'over'), 'Rondas por pieza', R.rondas === null ? '—' : R.rondas, 'incluidas en el plan: ' + max) +
+    kpi(R.atrasadas === 0 ? 'ok' : (R.atrasadas <= 3 ? 'warn' : 'over'), 'Tareas atrasadas', R.atrasadas, 'del equipo, en los lotes del mes') +
+    kpi('', 'Pedidos fuera del plan', R.extras, 'registrados este mes') + '</div>';
+  const al = [];
+  Object.keys(occ).forEach(s => { if (occ[s].length > 1) al.push('<b>T' + s + '</b>: ' + occ[s].map(esc).join(' y ') + ' escriben a la vez. ' + esc(nombreRol('guion') || 'Quien escribe') + ' trabaja un solo cliente por turno.'); });
+  const sinTurno = activos().filter(c => c.piezas > 0 && !cronoDe(c.id).turno);
+  if (sinTurno.length) al.push('Sin turno de escritura: <b>' + sinTurno.map(c => esc(c.nombre)).join(', ') + '</b>. Asígnalo en <b>Turnos</b>.');
+  const sinResp = S.tareas.filter(t => LOTE_RE.test(t.ciclo) && t.estado !== 'Listo' && !t.responsable);
+  if (sinResp.length) al.push(sinResp.length + ' tareas sin responsable (' + [...new Set(sinResp.map(t => t.etapaNombre))].slice(0, 3).map(esc).join(', ') + '). Asigna ese rol a alguien en <b>Ajustes</b>.');
+  todos.forEach(l => { const n = atrasosCliente(l, S.hoy); if (n) al.push('<b>' + esc(loteLabel(l)) + '</b>: ' + n + ' tarea' + (n > 1 ? 's' : '') + ' del cliente atrasada' + (n > 1 ? 's' : '') + '. Con «Retraso del cliente» (en Clientes) se mueve solo su entrega, nunca la de los demás.'); });
+  if (al.length) h += '<div class="alert w">' + al.join('<br>') + '</div>';
+
+  h += '<div class="card"><h4 style="margin-bottom:8px">Entregas del mes por cliente</h4>';
+  if (!R.lotes.length) h += '<div class="empty">Ningún lote se entrega en ' + mesLabel(ym) + '. Genera los lotes en <b>Clientes</b>.</div>';
+  else {
+    h += '<div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Entrega</th><th>Piezas</th><th>Avance del equipo</th><th>Dónde están las piezas</th><th>Estado</th></tr></thead><tbody>';
+    R.lotes.slice().sort((a, b) => fechaEntrega(a).localeCompare(fechaEntrega(b))).forEach(l => {
+      const tp = l.tareas.filter(t => t.responsable !== 'Cliente'), hechas = tp.filter(t => t.estado === 'Listo').length, pc = tp.length ? Math.round(hechas / tp.length * 100) : 0;
+      const fases = {}; Object.values(l.piezas).forEach(p => { const f = faseDe(p, l.lote); fases[f] = (fases[f] || 0) + 1; });
+      const ftxt = Object.keys(fases).filter(f => f !== 'Completada').map(f => fases[f] + ' ' + f.toLowerCase()).join(' · ') || 'todo completado';
+      const atr = atrasadasDe(l, S.hoy), atrC = atrasosCliente(l, S.hoy);
+      h += '<tr><td><b>' + esc(loteLabel(l)) + '</b></td><td>' + dm(fechaEntrega(l)) + '</td><td>' + l.n + '</td><td style="min-width:120px"><div class="prog"><i style="width:' + pc + '%"></i></div><span class="sub">' + pc + '% (' + hechas + ' de ' + tp.length + ')</span></td><td class="sub">' + esc(ftxt) + '</td><td>' + (atr === 0 ? '<span class="badge b-listo">En tiempo</span>' : (atr <= 3 ? '<span class="badge b-warn">Atención · ' + atr + ' atrasada' + (atr > 1 ? 's' : '') + '</span>' : '<span class="badge b-over">Atrasado · ' + atr + '</span>')) + (atrC ? ' <span class="badge b-rev">Cliente atrasado</span>' : '') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
+  const bu = burnup(ym, R.lotes, S.hoy);
+  h += '<div class="card"><h4 style="margin-bottom:4px">Piezas entregadas vs. planificadas</h4><div class="legend"><span><i class="lg" style="background:#591D33"></i>Planificado</span><span><i class="lg" style="background:#BF4F26"></i>Entregado</span></div>' + (bu.plan[bu.n - 1] ? svgBurnup(bu, ym, S.hoy) : '<div class="empty">Sin entregas planificadas este mes</div>') + '</div>';
+
+  const pip = pendientesPipeline(), fk = FASES.filter(f => f !== 'Completada' && pip[f]);
+  h += '<div class="card"><h4 style="margin-bottom:8px">Piezas en producción ahora</h4>' + (fk.length ? '<div class="phase-chips">' + fk.map(f => '<button class="pchip" data-act="irFase" data-f="' + esc(f) + '">' + esc(f) + ' · ' + pip[f] + '</button>').join('') + '</div>' : '<div class="empty">No hay piezas en producción</div>') + '</div>';
+
+  const sem = semanasDelMes(ym), filas = cargaHoras(S.tareas, S.equipo, sem, false), so = sobrecargas(filas, sem);
+  h += '<div class="card"><h4 style="margin-bottom:4px">Carga del equipo en el mes (horas planificadas)</h4>' + (so.length ? '<div class="alert r" style="margin:8px 0">' + so.map(x => '<b>' + esc(x.n) + '</b>: ' + x.tot + ' h la semana del ' + dm(x.s) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '') + tablaHoras(filas, sem, '') + '</div>';
+
+  const ex = S.extras.filter(x => String(x.fecha).slice(0, 7) === ym);
+  h += '<div class="card"><h4 style="margin-bottom:8px">Pedidos fuera del plan (' + ex.length + ')</h4>' + (ex.length ? ex.map(x => '<div class="row" style="border-bottom:1px solid var(--border);padding:6px 0"><span class="badge b-cambios">' + esc(x.tipo) + '</span><b>' + esc(x.cliente) + '</b><span class="sub">' + dm(x.fecha) + ' · ' + esc(x.descripcion) + '</span></div>').join('') : '<div class="empty">Ninguno este mes</div>') + '</div>';
+
+  h += '<div class="card"><h4 style="margin-bottom:8px">Turnos</h4>' + htmlTablero(items) + '</div>';
+  return h;
+}
+
+// ═════════ TURNOS ═════════
+function vTurnos() {
+  const ym = mes, items = itemsTurnos(), occ = ocupacion(items), usados = Object.keys(occ).length, libres = [1, 2, 3, 4, 5, 6].filter(s => !occ[s]);
+  let h = '<div class="head"><h2>Turnos · ' + mesLabel(ym) + '</h2><div class="row"><button class="btn sm" data-act="mes" data-d="-1"><i class="ti ti-chevron-left"></i></button><button class="btn sm" data-act="mes" data-d="0">Este mes</button><button class="btn sm" data-act="mes" data-d="1"><i class="ti ti-chevron-right"></i></button></div></div>';
+  h += '<p class="sub" style="margin-bottom:10px">El mes se divide en 6 turnos de 5 días. Cada cliente recorre tres turnos seguidos: escritura, grabación y edición. ' + esc(nombreRol('guion') || 'Quien escribe') + ' escribe para un solo cliente a la vez y ' + esc(nombreRol('edicion') || 'quien edita') + ' edita para un solo cliente a la vez.</p>';
+  h += (libres.length ? '<div class="alert g"><b>' + usados + ' de 6 turnos ocupados.</b> ' + (libres.length === 1 ? 'Queda 1 turno libre (T' + libres[0] + '): cabe un cliente nuevo de hasta ' + porTurno() + ' piezas.' : 'Quedan ' + libres.length + ' turnos libres (' + libres.map(s => 'T' + s).join(', ') + ').') + '</div>' : '<div class="alert r"><b>6 de 6 turnos ocupados.</b> Un cliente más necesita un segundo editor y un séptimo turno.</div>');
+  Object.keys(occ).forEach(s => { if (occ[s].length > 1) h += '<div class="alert r"><b>Choque en T' + s + ':</b> ' + occ[s].map(esc).join(' y ') + ' escriben a la vez.</div>'; });
+  h += '<div class="card"><h4 style="margin-bottom:4px">Turno de escritura de cada cliente</h4><p class="sub" style="margin-bottom:8px">Un cliente de hasta ' + porTurno() + ' piezas al mes ocupa 1 turno; de ' + (porTurno() + 1) + ' a ' + porTurno() * 2 +', 2 turnos seguidos (dos tandas).</p><div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Piezas/mes</th><th>Ocupa</th><th>Turno de escritura</th></tr></thead><tbody>' +
+    activos().map(c => { const t = cronoDe(c.id).turno, tn = tandasDe(c.piezas, porTurno()); return '<tr><td><b>' + esc(c.nombre) + '</b></td><td>' + c.piezas + '</td><td>' + (c.piezas ? tn + ' turno' + (tn > 1 ? 's' : '') : '—') + '</td><td><select data-turno="' + esc(c.id) + '"><option value="">Sin turno</option>' + [1, 2, 3, 4, 5, 6].map(k => { const r = rangoTurno('2000-01', k); return '<option value="' + k + '" ' + (t === k ? 'selected' : '') + '>T' + k + ' (días ' + r.ini + '–' + r.fin + ')</option>'; }).join('') + '</select></td></tr>'; }).join('') +
+    '</tbody></table></div><div style="margin-top:10px"><button class="btn sm p" data-act="turnos-save"><i class="ti ti-device-floppy"></i>Guardar turnos</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:8px">Qué pasa en cada turno</h4>' + htmlTablero(items) + '</div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Fechas fijas de cada cliente · ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">Estas fechas se comunican al cliente y van en el anexo de su contrato. Su mes de servicio empieza el día que recibe su contenido.</p>' + htmlFijas(ym, filasFijas(items)) + '</div>';
+  h += '<div class="alert i"><b>Reglas del sistema:</b> un retraso no se contagia (si un cliente no aprueba o no graba a tiempo, se mueve solo su entrega) · si una fecha cae en domingo, se adelanta · antes de ofrecer un cupo, revisa cuántos turnos quedan libres.</div>';
+  return h;
+}
+
+// ═════════ CALENDARIO ═════════
+function filtrar(t) {
+  if (fP && (fP === 'Sin asignar' ? t.responsable !== '' : t.responsable !== fP)) return false;
+  if (fC && t.clienteId !== fC) return false;
+  return true;
+}
+function cardTarea(t, late) {
+  return '<div class="task t-' + SLUG[t.estado] + (late ? ' late' : '') + '" data-act="tarea" data-id="' + esc(t.id) + '"><b>' + esc(t.cliente) + '</b><span>' + (t.pieza === '0' ? 'Lote' : 'Pieza ' + esc(t.pieza)) + ' · ' + esc(t.etapaNombre) + '</span><span>' + esc(t.responsable || 'Sin asignar') + ' · ' + esc(t.estado) + '</span></div>';
+}
+function selFiltros() {
+  const personas = S.equipo.filter(p => p.activo !== 'NO').map(p => p.nombre).concat(['Cliente', 'Sin asignar']);
+  return '<select data-filter="p"><option value="">Todas las personas</option>' + personas.map(p => '<option ' + (fP === p ? 'selected' : '') + '>' + esc(p) + '</option>').join('') + '</select>' +
+    '<select data-filter="c"><option value="">Todos los clientes</option>' + activos().map(c => '<option value="' + esc(c.id) + '" ' + (fC === c.id ? 'selected' : '') + '>' + esc(c.nombre) + '</option>').join('') + '</select>';
+}
+function vCalendario() {
+  const lun = addDays(lunes(S.hoy), semOff * 7), dias = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(lun, i)), ts = S.tareas.filter(filtrar);
+  const atras = ts.filter(t => t.fecha < S.hoy && t.estado !== 'Listo').sort((a, b) => a.fecha.localeCompare(b.fecha));
+  let h = '<div class="head"><h2>Calendario</h2><div class="row">' + selFiltros() + '</div></div>';
+  h += '<div class="row" style="margin-bottom:12px"><button class="btn sm" data-act="sem" data-d="-1"><i class="ti ti-chevron-left"></i></button><b>' + dm(lun) + ' – ' + dm(dias[6]) + '</b><button class="btn sm" data-act="sem" data-d="1"><i class="ti ti-chevron-right"></i></button><button class="btn sm" data-act="sem" data-d="0">Hoy</button></div>';
+  if (S.tareas.length === 0) h += '<div class="alert i">Aún no hay tareas. Ve a <b>Clientes</b> y genera el lote de cada cliente.</div>';
+  if (atras.length) h += '<div class="alert r"><b>' + atras.length + ' tarea' + (atras.length > 1 ? 's' : '') + ' atrasada' + (atras.length > 1 ? 's' : '') + '</b> (en rojo)</div><div class="card">' + atras.slice(0, 12).map(t => '<div style="margin-bottom:4px">' + cardTarea(t, true) + '<span class="sub">Vencía el ' + corta(t.fecha) + '</span></div>').join('') + (atras.length > 12 ? '<div class="sub">+ ' + (atras.length - 12) + ' más…</div>' : '') + '</div>';
+  h += '<div class="week">' + dias.map(d => {
+    const w = parse(d).getDay(), dt = ts.filter(t => t.fecha === d).sort((a, b) => a.cliente.localeCompare(b.cliente) || a.pieza - b.pieza);
+    return '<div class="day ' + (d === S.hoy ? 'hoy ' : '') + (w === 0 || w === 6 ? 'we' : '') + '"><h4>' + corta(d) + (d === S.hoy ? ' · hoy' : '') + '</h4>' + (dt.length ? dt.map(t => cardTarea(t, false)).join('') : '<div class="sub">—</div>') + '</div>';
+  }).join('') + '</div>';
+  return h;
+}
+
+// ═════════ MIS TAREAS ═════════
+function vMis() {
+  const personas = S.equipo.filter(p => p.activo !== 'NO').map(p => p.nombre);
+  let h = '<div class="head"><h2>Mis tareas</h2><div class="row"><span class="sub">Soy:</span><select data-filter="yo"><option value="">Elige tu nombre</option>' + personas.map(p => '<option ' + (YO === p ? 'selected' : '') + '>' + esc(p) + '</option>').join('') + '</select></div></div>';
+  if (!YO) return h + '<div class="empty">Elige tu nombre para ver solo lo que te toca a ti. Se acuerda en este dispositivo.</div>';
+  const mine = S.tareas.filter(t => t.responsable === YO && t.estado !== 'Listo').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.cliente.localeCompare(b.cliente));
+  const finSem = addDays(lunes(S.hoy), 7), fin3 = addDays(lunes(S.hoy), 28);
+  const grupos = [['Atrasadas', mine.filter(t => t.fecha < S.hoy)], ['Esta semana', mine.filter(t => t.fecha >= S.hoy && t.fecha < finSem)], ['Próximas 3 semanas', mine.filter(t => t.fecha >= finSem && t.fecha < fin3)]];
+  const horas = Math.round(mine.reduce((a, t) => a + (parseFloat(t.horas) || 0), 0) * 10) / 10, cap = capOf(YO);
+  h += '<div class="alert i">' + mine.length + ' tarea' + (mine.length === 1 ? '' : 's') + ' pendiente' + (mine.length === 1 ? '' : 's') + ' · ' + horas + ' h estimadas' + (cap ? ' · tienes ' + cap + ' h por semana' : '') + '</div>';
+  grupos.forEach(g => {
+    if (!g[1].length) return;
+    h += '<div class="card"><h4 style="margin-bottom:8px">' + g[0] + ' (' + g[1].length + ')</h4>' + g[1].map(t =>
+      '<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--border);padding:8px 0"><div><b>' + esc(t.cliente) + '</b> · ' + (t.pieza === '0' ? 'Lote' : 'Pieza ' + esc(t.pieza)) + ' · ' + esc(t.etapaNombre) + '<br><span class="sub">' + corta(t.fecha) + ' · <span class="badge b-' + SLUG[t.estado] + '">' + esc(t.estado) + '</span>' + (t.notas ? ' · ' + esc(t.notas) : '') + '</span></div><div class="row">' +
+      (t.etapa === 'calidad' ? '<button class="btn sm p" data-act="irPiezas">Revisar</button>' : (t.estado !== 'En curso' ? '<button class="btn sm" data-act="rapido" data-id="' + esc(t.id) + '" data-e="En curso">Empezar</button>' : '') + '<button class="btn sm p" data-act="rapido" data-id="' + esc(t.id) + '" data-e="Listo"><i class="ti ti-check"></i>Listo</button>') +
+      '<button class="btn sm" data-act="tarea" data-id="' + esc(t.id) + '">Abrir</button></div></div>').join('') + '</div>';
+  });
+  if (!mine.length) h += '<div class="empty">No tienes tareas pendientes 🎉</div>';
+  return h;
+}
+
+// ═════════ PIEZAS ═════════
+const fechaFase = (f, p, L) => { const t = (f === 'En guionización' && p.guion) || (f === 'En edición' && p.edicion) || (f === 'En control de calidad' && p.calidad) || ((f === 'En revisión del cliente' || f === 'Reenviado a revisión') && p.revvideo) || (f === 'Guion en revisión del cliente' && L.aprobguion) || (f === 'Esperando grabación o material' && (L.material || L.grabacion)) || (f === 'Listo para entregar' && L.entrega) || (f === 'Requiere actualización' && (p.revvideo || p.edicion)); return t ? t.fecha : ''; };
+const tareaFase = (f, p, L) => (f === 'En guionización' && p.guion) || (f === 'En edición' && p.edicion) || (f === 'En control de calidad' && p.calidad) || ((f === 'En revisión del cliente' || f === 'Reenviado a revisión') && p.revvideo) || (f === 'Guion en revisión del cliente' && L.aprobguion) || (f === 'Esperando grabación o material' && (L.material || L.grabacion)) || (f === 'Listo para entregar' && L.entrega) || (f === 'Requiere actualización' && ((p.revvideo && p.revvideo.estado === 'Con cambios') ? p.revvideo : (p.calidad && p.calidad.estado === 'Con cambios' ? p.calidad : p.edicion))) || p.guion || p.edicion || null;
+function filaPieza(r) {
+  const { l, pz, p, f } = r, L = l.lote, rv = p.revvideo, rd = rv ? (parseInt(rv.rondas) || 0) : 0, max = rondasMax(), items = checklistItems();
+  const at = 'data-cid="' + esc(l.clienteId) + '" data-ciclo="' + esc(l.ciclo) + '" data-pz="' + esc(pz) + '"';
+  const b = (act, txt, cls, ic) => '<button class="btn sm ' + (cls || '') + '" data-act="' + act + '" ' + at + '>' + (ic ? '<i class="ti ' + ic + '"></i>' : '') + txt + '</button>';
+  let acc = '';
+  if (f === 'En guionización') acc = b('pz-guion', 'Guion listo', 'p', 'ti-check');
+  else if (f === 'En edición') acc = b('pz-edit', 'Edición lista', 'p', 'ti-check');
+  else if (f === 'En control de calidad') acc = b('pz-qaok', 'Aprobar', 'p', 'ti-check') + b('pz-qacambios', 'Pedir cambios', 'd', 'ti-arrow-back-up');
+  else if (f === 'En revisión del cliente' || f === 'Reenviado a revisión') acc = b('pz-cliok', 'Cliente aprobó', 'p', 'ti-check') + b('pz-clicambios', 'Cliente pidió cambios', 'd', 'ti-arrow-back-up');
+  else if (f === 'Requiere actualización') acc = (rv && rv.estado === 'Con cambios') ? b('pz-reenviar', 'Actualización lista → reenviar', 'p', 'ti-send') : b('pz-corregido', 'Corregido → a calidad', 'p', 'ti-check');
+  const qa = f === 'En control de calidad' && p.calidad, ft = fechaFase(f, p, L), tk = tareaFase(f, p, L);
+  const notas = [p.edicion && p.edicion.notas, p.calidad && p.calidad.notas, rv && rv.notas].filter(Boolean)[0];
+  return '<div class="prow' + (qa ? ' qrow' : '') + '"' + (qa ? ' data-id="' + esc(p.calidad.id) + '"' : '') + ' style="border-bottom:1px solid var(--border);padding:10px 0"><div class="row" style="justify-content:space-between"><div><b>' + esc(loteLabel(l)) + '</b> · Pieza ' + esc(pz) + ' <span class="sub">(lote ' + MESES[+l.ciclo.slice(5, 7) - 1] + ')</span> <span class="badge b-' + (FASE_CLASE[f] || 'pend') + '">' + esc(f) + '</span>' + (rd ? ' <span class="badge ' + (rd > max ? 'b-over' : 'b-cambios') + '">Ronda ' + rd + ' de ' + max + (rd > max ? ' · fuera de alcance' : '') + '</span>' : '') + (qa && items.length ? ' <span class="badge b-vino">Checklist ' + marcados(p.calidad).filter(x => items.includes(x)).length + '/' + items.length + '</span>' : '') + (ft ? '<br><span class="sub">' + (ft < S.hoy && f !== 'Aprobado por el cliente' ? 'Vencía el ' : 'Para el ') + corta(ft) + '</span>' : '') + '</div><div class="row">' + acc + (tk ? '<button class="btn sm" data-act="tarea" data-id="' + esc(tk.id) + '">Abrir</button>' : '') + '</div></div>' +
+    (qa && items.length ? '<div class="row" style="margin-top:8px;gap:14px">' + items.map(it => '<label class="chk"><input type="checkbox" data-chk="' + esc(p.calidad.id) + '" value="' + esc(it) + '" ' + (marcados(p.calidad).includes(it) ? 'checked' : '') + '> ' + esc(it) + '</label>').join('') + '</div>' : '') +
+    (notas ? '<div class="sub" style="margin-top:6px">Notas: ' + esc(notas) + '</div>' : '') + '</div>';
+}
+function vPiezas() {
+  const ls = lotes(S.tareas).filter(l => !pCli || l.clienteId === pCli).sort((a, b) => fechaEntrega(a).localeCompare(fechaEntrega(b)));
+  const cuenta = {}, filas = [];
+  ls.forEach(l => Object.keys(l.piezas).sort((a, b) => a - b).forEach(pz => { const p = l.piezas[pz], f = faseDe(p, l.lote); cuenta[f] = (cuenta[f] || 0) + 1; filas.push({ l, pz, p, f }); }));
+  const vis = filas.filter(r => pFase ? r.f === pFase : !['Completada', 'Aprobado por el cliente'].includes(r.f));
+  let h = '<div class="head"><h2>Piezas</h2><div class="row"><select data-filter="pc"><option value="">Todos los clientes</option>' + activos().map(c => '<option value="' + esc(c.id) + '" ' + (pCli === c.id ? 'selected' : '') + '>' + esc(c.nombre) + '</option>').join('') + '</select></div></div>';
+  if (!filas.length) return h + '<div class="empty">Aún no hay piezas. Genera el lote de un cliente en <b>Clientes</b>.</div>';
+  h += '<div class="phase-chips" style="margin-bottom:12px"><button class="pchip ' + (!pFase ? 'on' : '') + '" data-act="fase" data-f="">En curso</button>' + FASES.filter(f => cuenta[f]).map(f => '<button class="pchip ' + (pFase === f ? 'on' : '') + '" data-act="fase" data-f="' + esc(f) + '">' + esc(f) + ' · ' + cuenta[f] + '</button>').join('') + '</div>';
+  h += '<div class="card">' + (vis.length ? vis.slice(0, 80).map(filaPieza).join('') + (vis.length > 80 ? '<div class="sub" style="padding-top:8px">Mostrando 80 de ' + vis.length + '. Filtra por cliente o por fase.</div>' : '') : '<div class="empty">No hay piezas en esta fase</div>') + '</div>';
+  return h;
+}
+
+// ═════════ CARGA ═════════
+function vCarga() {
+  const sem = semanasVista(), filas = cargaHoras(S.tareas, S.equipo, sem, true), so = sobrecargas(filas, sem);
+  let h = '<div class="head"><h2>Carga por persona</h2></div>';
+  h += '<p class="sub" style="margin-bottom:10px">Horas pendientes por semana frente a las horas que tiene cada persona. Las atrasadas se cuentan en «Esta semana». Las tareas del cliente no cargan al equipo. Verde: holgado · Amarillo: más del 70% · Naranja: se pasa.</p>';
+  h += so.length ? '<div class="alert r"><b>Atención:</b><br>' + so.map(x => esc(x.n) + ': ' + x.tot + ' h la semana ' + (x.i === 0 ? 'actual' : 'del ' + dm(x.s)) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : (S.tareas.length ? '<div class="alert g">Nadie se pasa de sus horas en las próximas 6 semanas.</div>' : '');
+  h += '<div class="card">' + tablaHoras(filas, sem, 'Esta semana') + '</div>';
+  h += '<p class="sub">Las horas por tarea y las horas de cada persona se ajustan en <b>Ajustes</b>.</p>';
+  return h;
+}
+
+// ═════════ CLIENTES ═════════
+const incluyeLabel = c => (c.incluye || []).map(k => SERV[k] || k).concat(c.alcanceOtro ? [c.alcanceOtro] : []).join(' · ') || (c.servicio || '—');
+function mesesDe(c) {
+  const hm = S.hoy.slice(0, 7), set = {}; set[hm] = 1; set[mesAdd(hm, 1)] = 1;
+  lotes(S.tareas).filter(l => l.clienteId === c.id).forEach(l => { if (l.tareas.some(t => t.estado !== 'Listo') || fechaEntrega(l) >= addDays(S.hoy, -20)) set[l.ciclo.slice(0, 7)] = 1; });
+  return Object.keys(set).sort();
+}
+function planLote(c, loteId, inv) {
+  const j = +loteId.split('-')[2];
+  return generarLote({ ym: loteId.slice(0, 7), turno: cronoDe(c.id).turno, tanda: j, tandas: tandasDe(c.piezas, porTurno()), piezas: c.piezas, incluye: c.incluye || [], etapas: S.etapas, equipo: S.equipo, investigacion: inv && j === 1 });
+}
+function vClientes() {
+  const cl = activos(), ls = lotes(S.tareas), hm = S.hoy.slice(0, 7);
+  let h = '<div class="head"><h2>Clientes activos</h2><span class="sub">Piezas y servicios vienen del CRM; el turno, de aquí</span></div>';
+  if (!cl.length) return h + '<div class="empty">No hay clientes activos en el CRM</div>';
+  h += '<div class="grid2">' + cl.map(c => {
+    const cr = cronoDe(c.id), tn = tandasDe(c.piezas, porTurno()), contenido = (c.incluye || []).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0);
+    let cuerpo = '';
+    if (!c.piezas) cuerpo = '<div class="alert w" style="margin:10px 0 0">Falta cargar las piezas por mes en el CRM (Editar cliente).</div>';
+    else if (!contenido) cuerpo = '<div class="alert i" style="margin:10px 0 0">No incluye guion, grabación ni edición: no genera lotes de contenido.</div>';
+    else if (!cr.turno) cuerpo = '<div class="alert w" style="margin:10px 0 0">Sin turno de escritura. Asígnalo en «Turno y reglas» o en la pantalla Turnos.</div>';
+    else {
+      const f = fechasFijas(hm, cr.turno);
+      cuerpo = '<div class="sub" style="margin-top:8px">Fechas fijas: guiones día ' + diaTxt(f.guiones, hm) + ' · aprueba ' + diaTxt(f.aprueba[0], hm) + ' y ' + diaTxt(f.aprueba[1], hm) + ' · graba ' + diaTxt(f.graba[0], hm) + ' y ' + diaTxt(f.graba[1], hm) + ' · material día ' + diaTxt(f.material, hm) + ' · contenido día ' + diaTxt(f.contenido, hm) + '</div>';
+      cuerpo += mesesDe(c).map(m => { let s = ''; for (let j = 1; j <= tn; j++) {
+        const id = m + '-' + j, l = ls.find(x => x.clienteId === c.id && x.ciclo === id), w = cr.turno + j - 1, n = piezasTanda(c.piezas, tn, j), e = rangoTurno(m, w), d = rangoTurno(m, w + 2);
+        s += '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>' + mesLabel(m) + (tn > 1 ? ' · tanda ' + j : '') + '</b><span class="sub">' + n + ' piezas</span></div><div class="sub">Escribe del ' + dm(e.desde) + ' al ' + dm(e.hasta) + ' → entrega el ' + dm(d.hasta) + '</div>';
+        if (l) {
+          const hechas = l.tareas.filter(t => t.estado === 'Listo').length;
+          s += '<div class="prog"><i style="width:' + Math.round(hechas / l.tareas.length * 100) + '%"></i></div><div class="sub">' + hechas + ' de ' + l.tareas.length + ' tareas listas</div><div class="row" style="gap:4px;margin:6px 0">' + Object.values(l.lote).sort((a, b) => a.fecha.localeCompare(b.fecha)).map(t => '<span class="lchip t-' + SLUG[t.estado] + '" data-act="tarea" data-id="' + esc(t.id) + '">' + esc(t.etapaNombre.split(' (')[0]) + ' · ' + dm(t.fecha) + '</span>').join('') + '</div>' +
+            '<div class="row"><button class="btn sm" data-act="gen" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-wand"></i>Completar</button><button class="btn sm" data-act="retraso" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-clock-pause"></i>Retraso del cliente</button><button class="btn sm d" data-act="borrarlote" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-trash"></i></button></div>';
+        } else s += '<div class="row" style="margin-top:6px"><button class="btn sm p" data-act="gen" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-wand"></i>Generar lote</button></div>';
+        s += '</div>'; } return s; }).join('');
+    }
+    const nx = S.extras.filter(x => x.clienteId === c.id && String(x.fecha).slice(0, 7) === hm).length;
+    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="turno" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Turno y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span><span class="badge b-vino">' + tn + ' turno' + (tn > 1 ? 's' : '') + '</span>' + (cr.turno ? '<span class="badge b-listo">Escribe en T' + cr.turno + '</span>' : '') + '</div>' + (cr.aprobador ? '<div class="sub" style="margin-top:6px">Aprueba: ' + esc(cr.aprobador) + '</div>' : '') + cuerpo +
+      '<div class="row" style="margin-top:12px;justify-content:space-between;border-top:1px solid var(--border);padding-top:10px"><span class="sub">Pedidos fuera del plan este mes: ' + nx + '</span><button class="btn sm" data-act="extra" data-id="' + esc(c.id) + '"><i class="ti ti-plus"></i>Registrar pedido</button></div></div>';
+  }).join('') + '</div>';
+  return h;
+}
+function abrirGen(id, loteId) {
+  const c = S.clientes.find(x => x.id === id); if (!c) return;
+  genCtx = { id, loteId };
+  const primero = !lotes(S.tareas).some(l => l.clienteId === id), plan = planLote(c, loteId, false), ini = plan.map(t => t.fecha).sort()[0] || S.hoy;
+  openModal('<h3>Lote · ' + esc(c.nombre) + '</h3><div class="sub">' + mesLabel(loteId.slice(0, 7)) + ' · tanda ' + loteId.split('-')[2] + ' · ' + piezasTanda(c.piezas, tandasDe(c.piezas, porTurno()), +loteId.split('-')[2]) + ' piezas · escribe en T' + (cronoDe(id).turno + (+loteId.split('-')[2]) - 1) + '</div>' +
+    (loteId.endsWith('-1') ? '<label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="g-inv" style="width:auto" ' + (primero ? 'checked' : '') + '> Incluir la investigación inicial (hallazgos y brief)</label>' : '<input type="checkbox" id="g-inv" hidden>') +
+    '<label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="g-pas" style="width:auto" ' + (ini < S.hoy ? 'checked' : '') + '> Dar por hechas las tareas anteriores a hoy</label>' +
+    '<div class="alert i" id="g-prev" style="margin-top:12px"></div><div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="gen-ok">Crear tareas</button></div>');
+  prevGen();
+}
+function prevGen() {
+  if (!$('g-prev')) return;
+  const c = S.clientes.find(x => x.id === genCtx.id), plan = planLote(c, genCtx.loteId, $('g-inv').checked);
+  const pas = $('g-pas').checked ? plan.filter(t => t.fecha < S.hoy).length : 0, horas = Math.round(plan.reduce((a, t) => a + (t.responsable === 'Cliente' ? 0 : t.horas), 0) * 10) / 10;
+  $('g-prev').innerHTML = 'Se crearán hasta <b>' + plan.length + ' tareas</b>' + (pas ? ' (' + pas + ' ya quedan como listas)' : '') + ' · <b>' + horas + ' h</b> de trabajo del equipo. Las que ya existan no se duplican.';
+}
+async function confirmarGen() {
+  const c = S.clientes.find(x => x.id === genCtx.id), plan = planLote(c, genCtx.loteId, $('g-inv').checked), pas = $('g-pas').checked, loteId = genCtx.loteId;
+  closeModal(); loading(true, 'Creando tareas…');
+  try {
+    for (let i = 0; i < plan.length; i += 30) {
+      const r = await api('addTareas', { d: { clienteId: c.id, cliente: c.nombre, ciclo: loteId, pasadasListo: pas, t: plan.slice(i, i + 30).map(x => [x.pieza, x.etapa, x.fecha, x.responsable, x.horas]) } });
+      if (!r.ok) throw new Error(r.error);
+    }
+    await cargar(); render();
+  } catch (e) { alert('No se pudo crear el lote: ' + e.message); setSync('err', 'Error'); }
+  loading(false);
+}
+async function borrarLote(id, loteId) {
+  const c = S.clientes.find(x => x.id === id); if (!c) return;
+  if (!confirm('¿Borrar todas las tareas del lote ' + loteId + ' de ' + c.nombre + '? También se quitan sus fechas del calendario.')) return;
+  loading(true, 'Borrando…');
+  try { const r = await api('borrarPlan', { d: { clienteId: id, ciclo: loteId } }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
+  loading(false);
+}
+function abrirRetraso(id, loteId) {
+  const l = lotes(S.tareas).find(x => x.clienteId === id && x.ciclo === loteId); if (!l) return;
+  genCtx = { id, loteId };
+  openModal('<h3>Retraso del cliente</h3><div class="sub">' + esc(loteLabel(l)) + ' · ' + mesLabel(loteId.slice(0, 7)) + '</div><p class="sub" style="margin:10px 0">Si el cliente no aprobó o no grabó a tiempo, se mueve <b>solo su entrega</b>: las ' + l.tareas.filter(t => t.estado !== 'Listo').length + ' tareas pendientes de este lote. Nunca se mueven las de otros clientes.</p><label class="l">¿Cuántos días se atrasó?</label><input type="number" id="r-dias" min="1" value="2"><div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="retraso-ok">Mover fechas</button></div>');
+}
+async function confirmarRetraso() {
+  const dias = parseInt($('r-dias').value) || 0; if (dias < 1) { alert('Indica cuántos días'); return; }
+  const c = genCtx; closeModal(); loading(true, 'Moviendo fechas…');
+  try { const r = await api('moverFechas', { d: { clienteId: c.id, ciclo: c.loteId, dias } }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
+  loading(false);
+}
+function abrirTurno(id) {
+  const c = S.clientes.find(x => x.id === id); if (!c) return;
+  const cr = cronoDe(id); ctxCli = id;
+  openModal('<h3>Turno y reglas · ' + esc(c.nombre) + '</h3><div class="sub">' + c.piezas + ' piezas al mes = ' + tandasDe(c.piezas, porTurno()) + ' turno(s)</div>' +
+    '<label class="l">Turno de escritura</label><select id="t-turno"><option value="">Sin turno</option>' + [1, 2, 3, 4, 5, 6].map(k => { const r = rangoTurno('2000-01', k); return '<option value="' + k + '" ' + (cr.turno === k ? 'selected' : '') + '>T' + k + ' (días ' + r.ini + ' a ' + r.fin + ')</option>'; }).join('') + '</select>' +
+    '<label class="l">Quién aprueba de su lado</label><input id="t-aprob" value="' + esc(cr.aprobador) + '"><label class="l">Notas (canal de aprobación, horarios, cuándo graba…)</label><textarea id="t-notas" rows="2">' + esc(cr.notas) + '</textarea>' +
+    '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="turno-ok">Guardar</button></div>');
+}
+async function guardarTurno() {
+  const d = { clienteId: ctxCli, turno: $('t-turno').value, aprobador: $('t-aprob').value.trim(), notas: $('t-notas').value.trim() };
+  closeModal(); loading(true, 'Guardando…');
+  try { const r = await api('saveCronograma', { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
+  loading(false);
+}
+async function guardarTurnos() {
+  const cambios = Array.from(document.querySelectorAll('select[data-turno]')).filter(s => (parseInt(s.value) || 0) !== cronoDe(s.dataset.turno).turno);
+  if (!cambios.length) { alert('No hay cambios que guardar'); return; }
+  loading(true, 'Guardando turnos…');
+  try { for (const s of cambios) { const cr = cronoDe(s.dataset.turno); const r = await api('saveCronograma', { d: { clienteId: s.dataset.turno, turno: s.value, aprobador: cr.aprobador, notas: cr.notas } }); if (!r.ok) throw new Error(r.error); } await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
+  loading(false);
+}
+function abrirExtra(id) {
+  const c = S.clientes.find(x => x.id === id); if (!c) return; ctxCli = id;
+  openModal('<h3>Pedido fuera del plan</h3><div class="sub">' + esc(c.nombre) + '</div><p class="sub" style="margin:10px 0">Lo que no está en el plan del mes se anota y se le propone al cliente cómo incluirlo. Nunca se absorbe en silencio.</p><label class="l">¿Qué pidió?</label><textarea id="x-desc" rows="3" placeholder="Ej: una pieza más para el lanzamiento"></textarea><label class="l">Cómo se resuelve</label><select id="x-tipo"><option>Extra cotizado</option><option>Reemplaza otra pieza</option></select><div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="extra-ok">Registrar</button></div>');
+}
+async function guardarExtra(desc, tipo, cid) {
+  const c = S.clientes.find(x => x.id === cid); desc = (desc || '').trim(); if (!desc) { alert('Describe el pedido'); return false; }
+  const r = await api('addExtra', { d: { clienteId: cid, cliente: c ? c.nombre : '', descripcion: desc, tipo } }); if (!r.ok) throw new Error(r.error);
+  return true;
+}
+
+// ═════════ SIMULADOR ═════════
+function calcSim() {
+  const incl = Array.from(document.querySelectorAll('#sim-incl input:checked')).map(i => i.value), piezas = parseInt($('sim-piezas').value) || 0;
+  sim = { piezas, incl, res: null };
+  if (piezas > 0) {
+    const items = itemsTurnos(), tn = tandasDe(piezas, porTurno()), s = primerHueco(items, tn), libres = N_TURNOS - Object.keys(ocupacion(items)).length, horas = {};
+    for (let j = 1; j <= tn; j++) { const hj = {}; generarLote({ ym: S.hoy.slice(0, 7), turno: s || 1, tanda: j, tandas: tn, piezas, incluye: incl, etapas: S.etapas, equipo: S.equipo, investigacion: j === 1 }).forEach(t => { if (t.responsable === 'Cliente') return; const k = t.responsable || 'Sin asignar'; hj[k] = (hj[k] || 0) + t.horas; }); Object.keys(hj).forEach(k => { horas[k] = Math.max(horas[k] || 0, hj[k]); }); }
+    sim.res = { tn, s, libres, horas };
+  }
+  render();
+}
+function vSimulador() {
+  let h = '<div class="head"><h2>Simulador de nuevos clientes</h2></div><p class="sub" style="margin-bottom:10px">Antes de ofrecer un cupo: ¿cuántos turnos ocuparía y hay lugar? Se calcula con los turnos de hoy, igual que en el Sistema de turnos.</p>';
+  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div></div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
+  if (sim.res) {
+    const r = sim.res;
+    h += '<div class="alert i">' + sim.piezas + ' piezas al mes = <b>' + r.tn + ' turno' + (r.tn > 1 ? 's' : '') + '</b>' + (r.tn > 1 ? ' seguidos, en dos tandas de grabación' : '') + '. Hoy hay ' + r.libres + ' turno' + (r.libres === 1 ? '' : 's') + ' libre' + (r.libres === 1 ? '' : 's') + '.</div>';
+    if (r.s) h += '<div class="alert g"><b>Entra.</b> Su turno de escritura sería <b>T' + r.s + '</b>' + (r.tn > 1 ? ' (y T' + (((r.s) % N_TURNOS) + 1) + ')' : '') + '. Su primer lote se produce dentro del onboarding y desde el segundo mes sigue su turno.</div><div class="card"><h4 style="margin-bottom:8px">Fechas fijas que se le comunicarían</h4>' + htmlFijas(S.hoy.slice(0, 7), [{ nombre: 'Cliente nuevo', w: r.s }]) + '</div>';
+    else h += '<div class="alert r"><b>No cabe con los turnos actuales.</b> Necesita ' + r.tn + ' turno' + (r.tn > 1 ? 's' : '') + (r.tn > 1 ? ' seguidos' : '') + ' y no hay ' + (r.tn > 1 ? 'dos libres juntos' : 'ninguno libre') + '. Según el Sistema de turnos, un cliente más necesita un segundo editor y un séptimo turno.</div>';
+    const nombres = Object.keys(r.horas);
+    h += '<div class="card"><h4 style="margin-bottom:8px">Trabajo que sumaría al equipo (dentro del turno de cada tanda)</h4>' + (nombres.length ? '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th>Horas</th><th>Frente a su semana</th></tr></thead><tbody>' + nombres.map(n => { const hh = Math.round(r.horas[n] * 10) / 10, cap = capOf(n); return '<tr><td>' + esc(n) + '</td><td>' + hh + ' h</td><td class="cg cg-' + nivel(r.horas[n], cap) + '">' + (cap ? Math.round(r.horas[n] / cap * 100) + '% de su semana (' + cap + ' h)' : '—') + '</td></tr>'; }).join('') + '</tbody></table></div><p class="sub" style="margin-top:6px">Incluye la investigación inicial. Las tareas de «Sin asignar» necesitan que alguien tenga ese rol.</p>' : '<div class="empty">Marca al menos un servicio de contenido</div>') + '</div>';
+  }
+  return h;
+}
+
+// ═════════ AJUSTES ═════════
+const opt = (arr, sel) => arr.map(k => '<option value="' + k[0] + '" ' + (sel === k[0] ? 'selected' : '') + '>' + k[1] + '</option>').join('');
+const SVC = [['', '—'], ['guion', 'Guionización'], ['grabacion', 'Grabación'], ['edicion', 'Edición'], ['trafico', 'Tráfico']], ALC = [['pieza', 'Por pieza'], ['lote', 'Una por lote'], ['cliente', 'Una por cliente']];
+const filaEtapa = e => '<tr data-key="' + esc(e.key) + '" data-orden="' + esc(e.orden) + '"><td><input data-f="nombre" value="' + esc(e.nombre) + '" style="width:190px"></td><td><input data-f="rol" value="' + esc(e.rol) + '" style="width:90px"></td><td><select data-f="alcance">' + opt(ALC, e.alcance || 'pieza') + '</select></td><td><input data-f="turnoRel" type="number" min="0" max="5" value="' + esc(e.turnoRel || '0') + '" style="width:56px"></td><td><input data-f="dia" type="number" min="1" max="5" value="' + esc(e.dia || '1') + '" style="width:56px"></td><td><input data-f="diaFin" type="number" min="1" max="5" value="' + esc(e.diaFin || e.dia || '1') + '" style="width:56px"></td><td><input data-f="horas" type="number" min="0" step="0.05" value="' + esc(e.horas || '0') + '" style="width:64px"></td><td><select data-f="requiere">' + opt(SVC, e.requiere) + '</select></td><td><select data-f="excluye">' + opt(SVC, e.excluye) + '</select></td><td><select data-f="calendario"><option ' + (e.calendario === 'SI' ? 'selected' : '') + '>SI</option><option ' + (e.calendario !== 'SI' ? 'selected' : '') + '>NO</option></select></td><td><input data-f="guia" value="' + esc(e.guia || '') + '" style="width:220px"></td><td><button class="btn sm d" data-act="et-del"><i class="ti ti-x"></i></button></td></tr>';
+function vAjustes() {
+  let h = '<div class="head"><h2>Ajustes</h2></div><div class="alert i">Lo que ves aquí sale de su Sistema de turnos y de sus manuales. Ajústalo cuando el proceso cambie: el plan, la carga y el dashboard se recalculan con esto.</div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Equipo y horas</h4><p class="sub" style="margin-bottom:8px">Roles separados por coma: guion, grabacion, edicion, calidad, trafico. Puedes agregar a quien necesites. Si cambias el nombre de alguien, sus tareas se actualizan solas.</p><div class="scroll"><table class="tbl" id="t-eq"><thead><tr><th>Nombre</th><th>Roles</th><th>Horas por semana</th><th>Activo</th><th></th></tr></thead><tbody>' +
+    S.equipo.map(p => '<tr data-id="' + esc(p.id) + '"><td><input data-f="nombre" value="' + esc(p.nombre) + '" style="width:130px"></td><td><input data-f="roles" value="' + esc(p.roles) + '" style="width:170px"></td><td><input data-f="horasSemana" type="number" min="0" value="' + esc(p.horasSemana) + '" style="width:80px"></td><td><select data-f="activo"><option ' + (p.activo !== 'NO' ? 'selected' : '') + '>SI</option><option ' + (p.activo === 'NO' ? 'selected' : '') + '>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>').join('') +
+    '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="eq-add"><i class="ti ti-plus"></i>Agregar persona</button><button class="btn sm p" data-act="eq-save"><i class="ti ti-device-floppy"></i>Guardar equipo</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Piezas que cubre un turno</label><input id="cfg-porturno" type="number" min="1" value="' + porTurno() + '" style="width:110px"></div><div><label class="l">Rondas de cambios incluidas por pieza</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div></div><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Etapas de cada lote</h4><p class="sub" style="margin-bottom:8px"><b>Turno</b>: 0 = turno de escritura, 1 = grabación, 2 = edición, 3 = revisión del cliente. <b>Día / Hasta</b>: día dentro del turno (5 = último). <b>Por pieza</b>: una tarea por video, repartidas entre esos días. <b>Una por lote</b>: una tarea con la fecha de «Hasta». <b>Requiere / Excluye</b>: la etapa solo existe si el cliente incluye (o no incluye) ese servicio. <b>Calendario</b>: se publica en Google Calendar. <b>Guía</b>: pasos de «cómo se hace», separados por |.</p><div class="scroll"><table class="tbl" id="t-et"><thead><tr><th>Etapa</th><th>Rol</th><th>Alcance</th><th>Turno</th><th>Día</th><th>Hasta</th><th>Horas</th><th>Requiere</th><th>Excluye</th><th>Calendario</th><th>Guía</th><th></th></tr></thead><tbody>' + S.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0)).map(filaEtapa).join('') + '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="et-add"><i class="ti ti-plus"></i>Agregar etapa</button><button class="btn sm p" data-act="et-save"><i class="ti ti-device-floppy"></i>Guardar etapas</button></div><p class="sub" style="margin-top:8px">Cambiar etapas no modifica lotes ya creados; aplica a los que generes después.</p></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Manuales</h4><p class="sub" style="margin-bottom:8px">Enlaces a sus documentos del Drive. El primero aparece como botón arriba.</p>' + [['cfg-u-manual', 'manualUrl', 'Manual de procesos y sistemas'], ['cfg-u-turnos', 'turnosUrl', 'Sistema de turnos de producción'], ['cfg-u-politica', 'politicaUrl', 'Política de revisiones y aprobaciones'], ['cfg-u-calidad', 'calidadUrl', 'Checklist de control de calidad']].map(u => '<label class="l">' + u[2] + '</label><input id="' + u[0] + '" value="' + esc(S.config[u[1]] || '') + '" style="width:100%">').join('') + '<div style="margin-top:10px"><button class="btn sm p" data-act="urls-save"><i class="ti ti-device-floppy"></i>Guardar enlaces</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Google Calendar</h4><p class="sub" style="margin-bottom:8px">Publica en el calendario de Sinergia las etapas con Calendario = SI (por defecto: envío de guiones, grabación o material, entrega y campañas) como eventos de todo el día con el prefijo «Prod ·». Si cambian fechas o responsables, vuelve a sincronizar.</p><button class="btn sm p" data-act="cal-sync"><i class="ti ti-calendar-event"></i>Sincronizar con Google Calendar</button></div>';
+  const legacy = S.tareas.filter(t => !LOTE_RE.test(t.ciclo)).length;
+  if (legacy) h += '<div class="card"><h4 style="margin-bottom:4px">Tareas del modelo anterior</h4><p class="sub" style="margin-bottom:8px">Hay ' + legacy + ' tareas creadas con la versión anterior de la app (por ciclo de pago y no por turnos). Ya no se usan en el dashboard.</p><button class="btn sm d" data-act="legacy"><i class="ti ti-trash"></i>Borrar tareas del modelo anterior</button></div>';
+  return h;
+}
+const slug = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '') || ('p' + Date.now());
+function leerTabla(id) { return Array.from(document.querySelectorAll('#' + id + ' tbody tr')).map(tr => { const o = {}; Object.assign(o, tr.dataset); tr.querySelectorAll('[data-f]').forEach(el => { o[el.dataset.f] = el.value; }); return o; }); }
+async function guardar(accion, d, ok) {
+  loading(true, 'Guardando…');
+  try { const r = await api(accion, { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); if (ok) alert(ok); } catch (e) { alert('Error: ' + e.message); }
+  loading(false);
+}
+const guardarEquipo = () => guardar('saveEquipo', leerTabla('t-eq').filter(o => (o.nombre || '').trim()).map(o => ({ id: o.id || slug(o.nombre), nombre: o.nombre.trim(), roles: (o.roles || '').trim(), capacidad: '', activo: o.activo || 'SI', horasSemana: o.horasSemana || '' })));
+function guardarEtapas() {
+  const filas = leer_et(); let mx = Math.max(0, ...filas.map(o => parseInt(o.orden) || 0)); const usadas = {};
+  return guardar('saveEtapas', filas.map(o => { let key = o.key || slug(o.nombre); while (usadas[key]) key += 'x'; usadas[key] = true; return { key, nombre: o.nombre.trim(), rol: (o.rol || '').trim(), diasAntes: '', requiere: o.requiere || '', orden: o.orden || String(++mx), excluye: o.excluye || '', calendario: o.calendario || 'NO', alcance: o.alcance || 'pieza', turnoRel: o.turnoRel || '0', dia: o.dia || '1', diaFin: o.diaFin || o.dia || '1', horas: o.horas || '0', guia: (o.guia || '').trim() }; }));
+}
+const leer_et = () => leerTabla('t-et').filter(o => (o.nombre || '').trim());
+const guardarReglas = () => guardar('saveConfig', { pares: { piezasPorTurno: String(parseInt($('cfg-porturno').value) || 25), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|') } });
+const guardarUrls = () => guardar('saveConfig', { pares: { manualUrl: $('cfg-u-manual').value.trim(), turnosUrl: $('cfg-u-turnos').value.trim(), politicaUrl: $('cfg-u-politica').value.trim(), calidadUrl: $('cfg-u-calidad').value.trim() } });
+async function limpiarLegacy() {
+  if (!confirm('¿Borrar las tareas del modelo anterior? Esta acción no se puede deshacer.')) return;
+  loading(true, 'Limpiando…');
+  try { const r = await api('limpiarLegacy'); if (!r.ok) throw new Error(r.error); await cargar(); render(); alert('Listo: ' + r.borradas + ' tareas borradas.'); } catch (e) { alert('Error: ' + e.message); }
+  loading(false);
+}
+async function sincCal() {
+  loading(true, 'Sincronizando con Google Calendar…');
+  let creados = 0, actualizados = 0;
+  try {
+    for (let i = 0; i < 40; i++) { const r = await api('sincCalendario', { d: { max: 25 } }); if (!r.ok) throw new Error(r.error); creados += r.creados; actualizados += r.actualizados; if (!r.pendientes) break; }
+    await cargar(); render();
+    alert('Calendario al día: ' + creados + ' evento' + (creados === 1 ? '' : 's') + ' creado' + (creados === 1 ? '' : 's') + ' y ' + actualizados + ' actualizado' + (actualizados === 1 ? '' : 's') + '.');
+  } catch (e) { alert('No se pudo sincronizar: ' + e.message + '\n\nSi es la primera vez, ejecuta probarCalendario() en el Apps Script, acepta el permiso y publica una nueva versión de la implementación.'); }
+  loading(false);
+}
+
+// ═════════ TAREA: EDITAR ═════════
+function openModal(html) { $('modal').innerHTML = html; $('overlay').classList.add('open'); }
+function closeModal() { $('overlay').classList.remove('open'); }
+const etapaDe = k => S.etapas.find(e => e.key === k) || {};
+function abrirTarea(id) {
+  const t = S.tareas.find(x => x.id === id); if (!t) return;
+  const hermanas = S.tareas.filter(x => x.clienteId === t.clienteId && x.ciclo === t.ciclo && x.pieza === t.pieza).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const personas = ['', 'Cliente'].concat(S.equipo.filter(p => p.activo !== 'NO').map(p => p.nombre));
+  const items = checklistItems(), m = marcados(t), guia = String(etapaDe(t.etapa).guia || '').split('|').map(s => s.trim()).filter(Boolean);
+  openModal('<h3>' + (t.pieza === '0' ? 'Lote' : 'Pieza ' + esc(t.pieza)) + ' · ' + esc(t.etapaNombre) + '</h3><div class="sub">' + esc(t.cliente) + ' · ' + esc(t.ciclo) + (parseInt(t.rondas) ? ' · ' + t.rondas + ' ronda(s) de cambios' : '') + '</div>' +
+    '<label class="l">Estado</label><select id="m-estado">' + ESTADOS.map(e => '<option ' + (t.estado === e ? 'selected' : '') + '>' + e + '</option>').join('') + '</select>' +
+    '<label class="l">Responsable</label><select id="m-resp">' + personas.map(p => '<option value="' + esc(p) + '" ' + (t.responsable === p ? 'selected' : '') + '>' + (p || 'Sin asignar') + '</option>').join('') + '</select>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Fecha</label><input type="date" id="m-fecha" value="' + esc(t.fecha) + '"></div><div><label class="l">Horas estimadas</label><input type="number" id="m-horas" min="0" step="0.05" value="' + esc(t.horas || '0') + '"></div></div>' +
+    (t.etapa === 'calidad' && items.length ? '<label class="l">Checklist de calidad</label><div id="m-chk" class="row" style="gap:14px">' + items.map(it => '<label class="chk"><input type="checkbox" value="' + esc(it) + '" ' + (m.includes(it) ? 'checked' : '') + '> ' + esc(it) + '</label>').join('') + '</div>' : '') +
+    '<label class="l">Notas</label><textarea id="m-notas" rows="2">' + esc(t.notas) + '</textarea>' +
+    (guia.length ? '<div class="guia"><b>Cómo se hace</b><ul>' + guia.map(g => '<li>' + esc(g) + '</li>').join('') + '</ul></div>' : '') +
+    '<div class="steps"><b style="font-size:12px">' + (t.pieza === '0' ? 'Etapas de este lote' : 'Etapas de esta pieza') + '</b>' + hermanas.map(x => '<div><span>' + esc(x.etapaNombre.split(' (')[0]) + ' · ' + dm(x.fecha) + '</span><span class="badge b-' + SLUG[x.estado] + '">' + esc(x.estado) + '</span></div>').join('') + '</div>' +
+    '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="guardar-tarea" data-id="' + esc(id) + '">Guardar</button></div>');
+}
+async function patchTarea(id, cambios) {
+  const t = S.tareas.find(x => x.id === id); if (!t) return;
+  if (cambios.estado !== undefined) {
+    if (cambios.estado === 'Listo' && t.estado !== 'Listo') cambios.fechaListo = S.hoy;
+    else if (cambios.estado !== 'Listo' && t.estado === 'Listo') cambios.fechaListo = '';
+  }
+  Object.assign(t, cambios);
+  const r = await api('updateTarea', { d: Object.assign({ id }, cambios) });
+  if (!r.ok) throw new Error(r.error);
+}
+async function conSync(fn) {
+  setSync('sync', 'Guardando…');
+  try { await fn(); setSync('ok', 'Sincronizado'); } catch (e) { setSync('err', 'Error'); alert('No se guardó: ' + e.message); }
+  render();
+}
+async function guardarTarea(id) {
+  const c = { estado: $('m-estado').value, responsable: $('m-resp').value, fecha: $('m-fecha').value, horas: $('m-horas').value || '0', notas: $('m-notas').value };
+  if ($('m-chk')) c.checklist = Array.from(document.querySelectorAll('#m-chk input:checked')).map(i => i.value).join('|');
+  closeModal(); await conSync(() => patchTarea(id, c));
+}
+const rapido = (id, estado) => conSync(() => patchTarea(id, { estado }));
+const toggleChk = id => {
+  const fila = Array.from(document.querySelectorAll('.qrow')).find(r => r.dataset.id === id); if (!fila) return Promise.resolve();
+  const v = Array.from(fila.querySelectorAll('input[data-chk]:checked')).map(i => i.value).join('|');
+  return conSync(() => patchTarea(id, { checklist: v }));
+};
+
+// ═════════ ACCIONES SOBRE UNA PIEZA ═════════
+const ctxPieza = (cid, ciclo, pz) => { const l = lotes(S.tareas).find(x => x.clienteId === cid && x.ciclo === ciclo); return l ? { l, p: l.piezas[pz] || {}, L: l.lote } : null; };
+const nota = (t, txt) => (t && t.notas ? t.notas + ' | ' : '') + txt;
+async function accionPieza(act, cid, ciclo, pz) {
+  const x = ctxPieza(cid, ciclo, pz); if (!x) return;
+  const p = x.p, items = checklistItems();
+  let motivo = '';
+  if (act === 'pz-qaok') {
+    const hechos = marcados(p.calidad).filter(k => items.includes(k)).length;
+    if (items.length && hechos < items.length && !confirm('El checklist está incompleto (' + hechos + ' de ' + items.length + '). ¿Aprobar de todos modos?')) return;
+  }
+  if (act === 'pz-qacambios') { motivo = prompt('¿Qué hay que corregir antes de enviarla al cliente?'); if (motivo === null) return; motivo = motivo.trim() || 'sin detalle'; }
+  if (act === 'pz-clicambios') { motivo = prompt('¿Qué cambio pidió el cliente?'); if (motivo === null) return; motivo = motivo.trim() || 'sin detalle'; }
+  let extra = false;
+  await conSync(async () => {
+    if (act === 'pz-guion') await patchTarea(p.guion.id, { estado: 'Listo' });
+    else if (act === 'pz-edit') await patchTarea(p.edicion.id, { estado: 'Listo' });
+    else if (act === 'pz-qaok') await patchTarea(p.calidad.id, { estado: 'Listo' });
+    else if (act === 'pz-qacambios') {
+      const txt = 'Calidad: ' + motivo;
+      await patchTarea(p.calidad.id, { estado: 'Con cambios', checklist: '', notas: nota(p.calidad, txt) });
+      if (p.edicion) await patchTarea(p.edicion.id, { estado: 'Con cambios', notas: nota(p.edicion, txt) });
+    } else if (act === 'pz-cliok') await patchTarea(p.revvideo.id, { estado: 'Listo' });
+    else if (act === 'pz-clicambios') {
+      const rv = p.revvideo, ronda = (parseInt(rv.rondas) || 0) + 1, txt = 'Ronda ' + ronda + ' (cliente): ' + motivo;
+      await patchTarea(rv.id, { estado: 'Con cambios', rondas: ronda, notas: nota(rv, txt) });
+      if (p.edicion) await patchTarea(p.edicion.id, { estado: 'Con cambios', notas: nota(p.edicion, txt) });
+      if (ronda > rondasMax() && confirm('Este cambio supera las ' + rondasMax() + ' ronda(s) incluidas en el plan. Según la política se cotiza como extra o reemplaza otra pieza. ¿Lo registro como pedido fuera del plan?')) {
+        extra = await guardarExtra('Pieza ' + pz + ' (' + rv.cliente + '): ronda ' + ronda + ' de cambios. ' + motivo, 'Extra cotizado', cid);
+      }
+    } else if (act === 'pz-reenviar') {
+      if (p.edicion) await patchTarea(p.edicion.id, { estado: 'Listo' });
+      await patchTarea(p.revvideo.id, { estado: 'En revisión' });
+    } else if (act === 'pz-corregido') {
+      if (p.edicion) await patchTarea(p.edicion.id, { estado: 'Listo' });
+      if (p.calidad) await patchTarea(p.calidad.id, { estado: 'Pendiente', checklist: '' });
+    }
+    if (extra) await cargar();
+  });
+}
+
+// ═════════ EVENTOS ═════════
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const a = el.dataset.act, id = el.dataset.id, d = el.dataset;
+  if (a === 'entrar') entrar($('code').value.trim());
+  else if (a === 'salir') { lsSet('prod_code', ''); location.reload(); }
+  else if (a === 'recargar') { cargar().then(render).catch(err => { setSync('err', 'Error'); alert(err.message); }); }
+  else if (a === 'nav') { view = d.v; render(); window.scrollTo(0, 0); }
+  else if (a === 'mes') { mes = d.d === '0' ? S.hoy.slice(0, 7) : mesAdd(mes, parseInt(d.d)); render(); }
+  else if (a === 'sem') { semOff = d.d === '0' ? 0 : semOff + parseInt(d.d); render(); }
+  else if (a === 'irFase') { view = 'piezas'; pFase = d.f; render(); window.scrollTo(0, 0); }
+  else if (a === 'irPiezas') { view = 'piezas'; render(); window.scrollTo(0, 0); }
+  else if (a === 'fase') { pFase = d.f; render(); }
+  else if (a === 'tarea') abrirTarea(id);
+  else if (a === 'cerrar') closeModal();
+  else if (a === 'guardar-tarea') guardarTarea(id);
+  else if (a === 'rapido') rapido(id, d.e);
+  else if (a.indexOf('pz-') === 0) accionPieza(a, d.cid, d.ciclo, d.pz);
+  else if (a === 'gen') abrirGen(id, d.ciclo);
+  else if (a === 'gen-ok') confirmarGen();
+  else if (a === 'borrarlote') borrarLote(id, d.ciclo);
+  else if (a === 'retraso') abrirRetraso(id, d.ciclo);
+  else if (a === 'retraso-ok') confirmarRetraso();
+  else if (a === 'turno') abrirTurno(id);
+  else if (a === 'turno-ok') guardarTurno();
+  else if (a === 'turnos-save') guardarTurnos();
+  else if (a === 'extra') abrirExtra(id);
+  else if (a === 'extra-ok') { const c = ctxCli, ds = $('x-desc').value, tp = $('x-tipo').value; loading(true, 'Guardando…'); guardarExtra(ds, tp, c).then(async ok => { if (ok) { closeModal(); await cargar(); render(); } }).catch(err => alert('Error: ' + err.message)).finally(() => loading(false)); }
+  else if (a === 'sim') calcSim();
+  else if (a === 'eq-add') document.querySelector('#t-eq tbody').insertAdjacentHTML('beforeend', '<tr><td><input data-f="nombre" style="width:130px"></td><td><input data-f="roles" style="width:170px"></td><td><input data-f="horasSemana" type="number" min="0" style="width:80px"></td><td><select data-f="activo"><option>SI</option><option>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>');
+  else if (a === 'eq-del' || a === 'et-del') el.closest('tr').remove();
+  else if (a === 'eq-save') guardarEquipo();
+  else if (a === 'et-add') document.querySelector('#t-et tbody').insertAdjacentHTML('beforeend', filaEtapa({ key: '', nombre: '', rol: '', alcance: 'lote', turnoRel: '0', dia: '1', diaFin: '1', horas: '0', requiere: '', excluye: '', calendario: 'NO', guia: '', orden: '' }));
+  else if (a === 'et-save') guardarEtapas();
+  else if (a === 'cfg-save') guardarReglas();
+  else if (a === 'urls-save') guardarUrls();
+  else if (a === 'cal-sync') sincCal();
+  else if (a === 'legacy') limpiarLegacy();
+});
+document.addEventListener('change', e => {
+  const t = e.target, f = t.dataset && t.dataset.filter;
+  if (f === 'p') { fP = t.value; render(); }
+  else if (f === 'c') { fC = t.value; render(); }
+  else if (f === 'pc') { pCli = t.value; render(); }
+  else if (f === 'yo') { YO = t.value; lsSet('prod_yo', YO); render(); }
+  else if (t.dataset && t.dataset.chk) toggleChk(t.dataset.chk);
+  else if (t.id === 'g-inv' || t.id === 'g-pas') prevGen();
+});
+$('overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
+$('code').addEventListener('keydown', e => { if (e.key === 'Enter') entrar($('code').value.trim()); });
+
+// ═════════ INICIO ═════════
+(function init() { const guardado = lsGet('prod_code'); if (guardado) entrar(guardado); })();
+</script>
+</body>
+</html>
