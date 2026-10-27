@@ -107,6 +107,14 @@ label.l{display:block;font-size:12px;font-weight:600;color:var(--text2);margin:1
 .legend{display:flex;gap:14px;font-size:12px;color:var(--text2);margin-bottom:4px}.legend .lg{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .lchip{border:1px solid var(--border);border-left:4px solid var(--border2);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;background:#fff}.lchip:hover{background:var(--surface2)}
 .guia{background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);padding:10px 12px;margin-top:12px;font-size:12px}.guia ul{margin:6px 0 0 16px}.guia li{margin-bottom:3px}
+.heat{border-collapse:collapse;font-size:11px}
+.heat th,.heat td{border:1px solid var(--border);text-align:center;padding:4px 2px;min-width:30px}
+.heat th{background:var(--surface2);color:var(--text2);font-weight:600;line-height:1.25}
+.heat .who{min-width:140px;text-align:left;padding:6px 10px;background:#fff;position:sticky;left:0;z-index:1}
+.heat td.off,.heat th.off{background:repeating-linear-gradient(45deg,#f4f1f2,#f4f1f2 4px,#ebe4e6 4px,#ebe4e6 8px)}
+.heat td.c{height:40px;font-weight:600;cursor:default}
+.heat th.hoy,.heat td.hoy{box-shadow:inset 0 0 0 2px var(--azul)}
+.heat td.tot{min-width:64px;font-size:12px}
 @media(max-width:900px){
   .week{grid-template-columns:1fr}.day{min-height:0}
   .content{padding:12px}.topbar{padding:0 12px}.top-right .hide-m{display:none}
@@ -144,7 +152,7 @@ label.l{display:block;font-size:12px;font-weight:600;color:var(--text2);margin:1
 // ═════════ CONFIG ═════════
 const API = 'https://script.google.com/macros/s/AKfycbzZ7vgrgejhuqKXuL_c629VSNt5mesLlnfnxC_PBDiYfmt0-j1_MY1eMPIe4lE8ohAqGQ/exec';
 
-// ═════════ LÓGICA PURA (turnos, plan, fases, métricas) ═════════
+// ═════════ LÓGICA PURA (calendario laboral, capacidad, plan hacia atrás, fases, métricas) ═════════
 // <<PURE
 const pad = n => String(n).padStart(2, '0');
 const fmt = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -153,81 +161,178 @@ const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); retu
 const diff = (a, b) => Math.round((parse(b) - parse(a)) / 864e5);
 const lunes = s => { const d = parse(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return fmt(d); };
 const mod = (a, n) => ((a % n) + n) % n;
-// Regla del Sistema de turnos: si una fecha cae en domingo, se adelanta (nunca se atrasa)
-const habil = s => (parse(s).getDay() === 0 ? addDays(s, -1) : s);
-
-// ── Sistema de turnos: el mes tiene 6 turnos de 5 días (el sexto cierra el día 30) ──
-const N_TURNOS = 6, DIAS_TURNO = 5;
+const num = (v, d) => { const x = parseFloat(v); return isNaN(x) ? d : x; };
 function mesAdd(ym, n) { const p = ym.split('-').map(Number); const t = p[0] * 12 + (p[1] - 1) + n; return Math.floor(t / 12) + '-' + pad(mod(t, 12) + 1); }
 function finMes(ym) { const p = ym.split('-').map(Number); return new Date(p[0], p[1], 0).getDate(); }
-// idx 1..6 = turnos del mes ym · 7..12 = turnos del mes siguiente · 0, -1… = del mes anterior
-function rangoTurno(ym, idx) {
-  const off = Math.floor((idx - 1) / N_TURNOS), k = mod(idx - 1, N_TURNOS) + 1, m = mesAdd(ym, off);
-  const ini = (k - 1) * DIAS_TURNO + 1, fin = k === N_TURNOS ? Math.min(30, finMes(m)) : k * DIAS_TURNO;
-  return { mes: m, k, ini, fin, desde: m + '-' + pad(ini), hasta: m + '-' + pad(fin) };
-}
-function fechaTurno(ym, idx, dia) { const r = rangoTurno(ym, idx); return r.mes + '-' + pad(dia >= DIAS_TURNO ? r.fin : Math.min(r.ini + dia - 1, r.fin)); }
 
-const tandasDe = (piezas, porTurno) => Math.max(1, Math.ceil((parseInt(piezas) || 0) / (parseInt(porTurno) || 25)));
+// ── Calendario laboral: lunes a sábado (sábado hasta el mediodía). Sin domingos ni feriados ──
+const parseFeriados = txt => String(txt || '').split(',').map(s => s.trim()).filter(Boolean);
+const esFeriado = (f, fer) => fer.indexOf(f) >= 0 || fer.indexOf(f.slice(5)) >= 0;
+const esLab = (f, fer) => parse(f).getDay() !== 0 && !esFeriado(f, fer);
+function prevLab(f, fer) { let g = f; for (let i = 0; i < 14 && !esLab(g, fer); i++) g = addDays(g, -1); return g; }
+function nextLab(f, fer) { let g = f; for (let i = 0; i < 14 && !esLab(g, fer); i++) g = addDays(g, 1); return g; }
+function addLab(f, n, fer) { let g = f, k = Math.abs(n); const s = n < 0 ? -1 : 1; while (k > 0) { g = addDays(g, s); if (esLab(g, fer)) k--; } return g; }
+// Horas que una persona tiene ese día (L–V una cifra, sábado otra)
+const horasDelDia = (p, f, fer) => (!esLab(f, fer) ? 0 : (parse(f).getDay() === 6 ? num((p || {}).horasSab, 4) : num((p || {}).horasDia, 8)));
+const capSemana = (p, lun, fer) => { let s = 0; for (let i = 0; i < 7; i++) s += horasDelDia(p, addDays(lun, i), fer); return s; };
+// Lo que le queda libre a una persona ese día, descontando lo que ya tiene comprometido (ocup[nombre][fecha])
+const capDisp = (p, f, fer, ocup) => Math.max(0, horasDelDia(p, f, fer) - ((((ocup || {})[(p || {}).nombre]) || {})[f] || 0));
+const capMes = (p, ym, fer) => { let s = 0; for (let d = 1; d <= finMes(ym); d++) s += horasDelDia(p, ym + '-' + pad(d), fer); return s; };
+
 const piezasTanda = (piezas, tandas, j) => { piezas = parseInt(piezas) || 0; return Math.floor(piezas / tandas) + (j <= piezas % tandas ? 1 : 0); };
 const piezasPrevias = (piezas, tandas, j) => { let s = 0; for (let i = 1; i < j; i++) s += piezasTanda(piezas, tandas, i); return s; };
+const personaDe = (rol, equipo) => (rol === 'cliente' ? null : equipo.find(x => x.activo !== 'NO' && String(x.roles || '').split(',').map(r => r.trim()).includes(rol)) || null);
+function asignar(rol, equipo) { if (rol === 'cliente') return 'Cliente'; const p = personaDe(rol, equipo); return p ? p.nombre : ''; }
 
-function asignar(rol, equipo) {
-  if (rol === 'cliente') return 'Cliente';
-  const p = equipo.find(x => x.activo !== 'NO' && String(x.roles || '').split(',').map(r => r.trim()).includes(rol));
-  return p ? p.nombre : '';
+// ── Un bloque de trabajo: retrocede desde el último día hasta juntar las horas que hacen falta ──
+function bloque(horas, p, fin, fer, ocup) {
+  const dias = []; let g = prevLab(fin, fer), acc = 0;
+  for (let i = 0; i < 400; i++) {
+    const c = capDisp(p, g, fer, ocup);
+    if (c > 0) { dias.unshift(g); acc += c; }
+    if (dias.length && acc + 1e-9 >= horas) break;
+    g = addDays(g, -1);
+  }
+  return { ini: dias[0] || fin, fin: dias[dias.length - 1] || fin, dias };
 }
-
-// Un "lote" = lo que se produce para un cliente en una tanda: escritura → grabación → edición → entrega.
-// o: {ym, turno, tanda, tandas, piezas, incluye[], etapas[], equipo[], investigacion}
-function generarLote(o) {
-  const tandas = o.tandas || 1, j = o.tanda || 1;
-  const n = piezasTanda(o.piezas, tandas, j), off = piezasPrevias(o.piezas, tandas, j);
-  if (n < 1 || !o.turno) return [];
-  const w = o.turno + (j - 1);
-  const etapas = o.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0))
-    .filter(e => !(e.requiere && !o.incluye.includes(e.requiere)) && !(e.excluye && o.incluye.includes(e.excluye)));
-  const out = [];
-  etapas.forEach(e => {
-    const alc = e.alcance || 'pieza';
-    if (alc === 'cliente' && !o.investigacion) return;
-    const idx = w + (parseInt(e.turnoRel) || 0), d1 = parseInt(e.dia) || 1, d2 = parseInt(e.diaFin) || d1;
-    const horas = parseFloat(e.horas) || 0, resp = asignar(e.rol, o.equipo);
-    const mk = (pieza, dia) => out.push({ pieza: String(pieza), etapa: e.key, etapaNombre: e.nombre, fecha: habil(fechaTurno(o.ym, idx, dia)), responsable: resp, horas });
-    if (alc === 'pieza') { const span = d2 - d1 + 1; for (let i = 1; i <= n; i++) mk(off + i, d1 + Math.floor((i - 1) * span / n)); }
-    else mk(0, d2);
+// Reparte tareas (horas de cada una) entre los días del bloque, respetando lo que rinde la persona cada día.
+function repartir(horas, p, dias, fer, ocup) {
+  if (!dias.length) return horas.map(() => null);
+  const out = []; let di = 0, rem = capDisp(p, dias[0], fer, ocup);
+  horas.forEach(h => {
+    let need = h;
+    while (need > 1e-9) {
+      if (rem <= 1e-9) { if (di < dias.length - 1) { di++; rem = capDisp(p, dias[di], fer, ocup); } else rem = Infinity; }
+      const use = Math.min(need, rem); need -= use; rem -= use;
+    }
+    out.push(dias[di]);
   });
   return out;
 }
 
-// Fechas fijas que se le comunican al cliente (anexo del contrato)
-function fechasFijas(ym, w) {
-  const e = rangoTurno(ym, w), g = rangoTurno(ym, w + 1), d = rangoTurno(ym, w + 2);
-  return { guiones: e.hasta, aprueba: [g.desde, fechaTurno(ym, w + 1, 2)], graba: [fechaTurno(ym, w + 1, 3), fechaTurno(ym, w + 1, 4)], material: g.hasta, contenido: d.hasta };
+// Fechas clave de un lote, HACIA ATRÁS desde la fecha de entrega (que es fija por contrato).
+// o: {entrega, fer, diasAprob, diasGrab, guion, edicion, hEscritura, hEdicion, hCalidad, pEscritura, pEdicion, pCalidad, inv}
+function planFechas(o) {
+  const fer = o.fer || [], dA = o.diasAprob || 2, dG = o.diasGrab || 2;
+  const E = prevLab(o.entrega, fer), r = { entrega: E };
+  if (o.edicion) {
+    r.qa = bloque(o.hCalidad, o.pCalidad, E, fer, o.ocup);
+    r.ed = bloque(o.hEdicion, o.pEdicion, addLab(E, -1, fer), fer, o.ocup);
+    r.material = addLab(r.ed.ini, -1, fer);
+    r.grab = [addLab(r.material, -(dG - 1), fer), r.material];
+    if (o.guion) { const A = addLab(r.grab[0], -1, fer); r.aprueba = [addLab(A, -(dA - 1), fer), A]; r.envio = addLab(r.aprueba[0], -1, fer); }
+    r.revision = [addLab(E, 1, fer), addLab(E, dA, fer)];
+  } else if (o.guion) {
+    r.envio = E; r.aprueba = [addLab(E, 1, fer), addLab(E, dA, fer)];
+  }
+  if (o.guion) { r.wr = bloque(o.hEscritura, o.pEscritura, r.envio, fer, o.ocup); r.inv = addLab(r.wr.ini, -1, fer); }
+  return r;
 }
-// items: [{nombre, turno (escritura), tandas}] → qué pasa en cada turno del mes (régimen continuo)
-function tablero(items) {
-  const t = [1, 2, 3, 4, 5, 6].map(() => ({ escribe: [], graba: [], edita: [], entrega: [] }));
-  items.forEach(c => {
-    if (!c.turno) return;
-    for (let j = 1; j <= c.tandas; j++) {
-      const w = c.turno + j - 1, nom = c.nombre + (c.tandas > 1 ? ', tanda ' + j : '');
-      [[0, 'escribe'], [1, 'graba'], [2, 'edita'], [2, 'entrega']].forEach(p => {
-        [w + p[0], w + p[0] - N_TURNOS].forEach(x => { if (x >= 1 && x <= N_TURNOS) t[x - 1][p[1]].push(nom); });
-      });
+const sortEt = (a, b) => (+a.orden || 0) - (+b.orden || 0);
+const cumpleEt = (e, incluye) => !(e.requiere && !incluye.includes(e.requiere)) && !(e.excluye && incluye.includes(e.excluye));
+const esPieza = e => (e.alcance || 'pieza') === 'pieza';
+function fechaAncla(plan, a) {
+  return ({ investigacion: plan.inv, envio: plan.envio, aprobacion: plan.aprueba && plan.aprueba[1], material: plan.material, entrega: plan.entrega, revision: plan.revision && plan.revision[1],
+    escritura: plan.wr && plan.wr.fin, edicion: plan.ed && plan.ed.fin, calidad: plan.qa && plan.qa.fin })[a];
+}
+// Construye el plan de un lote (fechas clave + etapas activas)
+function construirPlan(o) {
+  const tandas = o.tandas || 1, j = o.tanda || 1, fer = o.fer || [];
+  const n = piezasTanda(o.piezas, tandas, j), off = piezasPrevias(o.piezas, tandas, j);
+  const etapas = o.etapas.slice().sort(sortEt).filter(e => cumpleEt(e, o.incluye));
+  const bh = a => etapas.filter(e => esPieza(e) && e.ancla === a).reduce((s, e) => s + n * num(e.horas, 0), 0);
+  const bp = a => { const e = etapas.find(x => esPieza(x) && x.ancla === a); return e ? personaDe(e.rol, o.equipo) : null; };
+  const plan = (n < 1 || !o.entrega) ? null : planFechas({ entrega: o.entrega, fer, diasAprob: num(o.diasAprob, 2), diasGrab: num(o.diasGrab, 2), guion: etapas.some(e => esPieza(e) && e.ancla === 'escritura'), edicion: etapas.some(e => esPieza(e) && e.ancla === 'edicion'),
+    hEscritura: bh('escritura'), hEdicion: bh('edicion'), hCalidad: bh('calidad'), pEscritura: bp('escritura'), pEdicion: bp('edicion'), pCalidad: bp('calidad'), inv: o.investigacion, ocup: o.ocup });
+  return { n, off, etapas, plan, fer };
+}
+// o: {entrega, tanda, tandas, piezas, incluye[], etapas[], equipo[], fer[], diasAprob, diasGrab, investigacion}
+function generarLote(o) {
+  const { n, off, etapas, plan, fer } = construirPlan(o);
+  if (!plan) return [];
+  const out = []; let edF = null;
+  etapas.forEach(e => {
+    const alc = e.alcance || 'pieza', anc = e.ancla || 'entrega', horas = num(e.horas, 0), resp = asignar(e.rol, o.equipo), desp = parseInt(e.offsetDias) || 0;
+    if (alc === 'cliente' && !o.investigacion) return;
+    const mk = (pieza, f) => { if (f) out.push({ pieza: String(pieza), etapa: e.key, etapaNombre: e.nombre, fecha: f, responsable: resp, horas }); };
+    if (alc === 'pieza') {
+      const blk = { escritura: plan.wr, edicion: plan.ed, calidad: plan.qa }[anc];
+      if (blk) {
+        let fechas = repartir(Array(n).fill(horas), personaDe(e.rol, o.equipo), blk.dias, fer, o.ocup);
+        if (anc === 'edicion') edF = fechas;
+        if (anc === 'calidad' && edF) fechas = fechas.map((f, i) => { const min = edF[i] ? (addLab(edF[i], 1, fer) < plan.entrega ? addLab(edF[i], 1, fer) : plan.entrega) : f; return f < min ? min : f; });
+        fechas.forEach((f, i) => mk(off + i + 1, f));
+      } else { const f = fechaAncla(plan, anc); for (let i = 1; i <= n; i++) mk(off + i, f && desp ? addLab(f, desp, fer) : f); }
+    } else {
+      let f = fechaAncla(plan, anc); if (f && desp) f = addLab(f, desp, fer);
+      if (f && alc === 'cliente' && horas > 0) { const pe = personaDe(e.rol, o.equipo); for (let i = 0; i < 10 && capDisp(pe, f, fer, o.ocup) + 1e-9 < horas; i++) f = prevLab(addDays(f, -1), fer); }
+      mk(0, f);
     }
   });
-  return t;
+  return out;
 }
-function ocupacion(items) {
-  const occ = {};
-  items.forEach(c => { if (!c.turno) return; for (let j = 0; j < c.tandas; j++) { const s = mod(c.turno - 1 + j, N_TURNOS) + 1; (occ[s] = occ[s] || []).push(c.nombre); } });
-  return occ;
+// Fechas que se le comunican al cliente (para el anexo del contrato)
+const fechasCliente = p => ({ guiones: p.envio, aprueba: p.aprueba, graba: p.grab, material: p.material, contenido: p.entrega, apruebaContenido: p.revision, escribe: p.wr ? [p.wr.ini, p.wr.fin] : null, edita: p.ed ? [p.ed.ini, p.ed.fin] : null });
+const entregaDelMes = (ym, dia) => ym + '-' + pad(Math.min(Math.max(1, parseInt(dia) || 1), finMes(ym)));
+
+// ── Carga por día y por persona (horas) ──
+function cargaDiaria(tareas, equipo, desde, hasta, soloPend) {
+  const m = {}; equipo.filter(p => p.activo !== 'NO').forEach(p => { m[p.nombre] = {}; });
+  tareas.forEach(t => {
+    const h = num(t.horas, 0); if (!h || !t.responsable || t.responsable === 'Cliente') return;
+    if (soloPend && t.estado === 'Listo') return;
+    if (t.fecha < desde || t.fecha > hasta) return;
+    const x = (m[t.responsable] = m[t.responsable] || {}); x[t.fecha] = (x[t.fecha] || 0) + h;
+  });
+  return m;
 }
-function primerHueco(items, tandasNec) {
-  const occ = ocupacion(items);
-  for (let s = 1; s <= N_TURNOS; s++) { let libre = true; for (let j = 0; j < tandasNec; j++) if (occ[mod(s - 1 + j, N_TURNOS) + 1]) libre = false; if (libre) return s; }
-  return 0;
+// Un día solo cuenta como sobrecarga si se pasa más de un 10 % (los cierres de 15 minutos no cuentan)
+const TOL = 1.10;
+// Días en que alguien supera el umbral indicado (ratio de horas del día / horas que tiene)
+function diasCargados(carga, equipo, fer, umbral) {
+  const out = [];
+  Object.keys(carga).forEach(n => { const p = equipo.find(x => x.nombre === n); Object.keys(carga[n]).sort().forEach(f => { const cap = horasDelDia(p, f, fer), h = carga[n][f], r = cap ? h / cap : 99; if (r > umbral + 1e-9) out.push({ persona: n, fecha: f, horas: Math.round(h * 100) / 100, cap, ratio: r, sobre: r > TOL }); }); });
+  return out;
+}
+// Horas al mes que piden los clientes activos según sus piezas (no depende de haber generado los lotes)
+function demandaMes(clientes, etapas, equipo) {
+  const d = {};
+  clientes.forEach(c => etapas.forEach(e => {
+    if (!cumpleEt(e, c.incluye) || (e.alcance || 'pieza') === 'cliente') return;
+    const h = num(e.horas, 0), resp = asignar(e.rol, equipo); if (!h || !resp || resp === 'Cliente') return;
+    d[resp] = (d[resp] || 0) + (esPieza(e) ? c.piezas * h : c.tandas * h);
+  }));
+  return d;
+}
+// Ocupación y cuántas piezas más caben por persona (con el umbral de planificación)
+function capacidadMes(ym, clientes, etapas, equipo, fer, umbral) {
+  const dem = demandaMes(clientes, etapas, equipo);
+  return equipo.filter(p => p.activo !== 'NO').map(p => {
+    const cap = capMes(p, ym, fer), dm_ = dem[p.nombre] || 0;
+    const hpp = etapas.filter(e => esPieza(e) && asignar(e.rol, equipo) === p.nombre).reduce((s, e) => s + num(e.horas, 0), 0);
+    return { nombre: p.nombre, cap, demanda: Math.round(dm_ * 10) / 10, pct: cap ? dm_ / cap : 0, hpp, margen: hpp ? Math.max(0, Math.floor((cap * umbral - dm_) / hpp + 1e-9)) : null };
+  });
+}
+// ¿Cabe un cliente nuevo con esa fecha de entrega? Se suma su plan a lo que ya hay y se mira el día más cargado.
+function evaluarEntrega(o) {
+  const ocup = cargaDiaria(o.tareas, o.equipo, '0000-00-00', '9999-99-99', true);
+  const tasks = generarLote({ entrega: o.entrega, tanda: 1, tandas: 1, piezas: o.piezas, incluye: o.incluye, etapas: o.etapas, equipo: o.equipo, fer: o.fer, diasAprob: o.diasAprob, diasGrab: o.diasGrab, investigacion: !!o.investigacion, ocup });
+  if (!tasks.length) return null;
+  const fs_ = tasks.map(t => t.fecha).sort(), desde = fs_[0], hasta = fs_[fs_.length - 1];
+  const base = ocup, add = cargaDiaria(tasks, o.equipo, desde, hasta, false);
+  let pico = { ratio: 0 };
+  Object.keys(add).forEach(n => { const p = o.equipo.find(x => x.nombre === n); Object.keys(add[n]).forEach(f => { const cap = horasDelDia(p, f, o.fer), tot = ((base[n] || {})[f] || 0) + add[n][f], r = cap ? tot / cap : 99; if (r > pico.ratio) pico = { persona: n, fecha: f, horas: Math.round(tot * 100) / 100, cap, ratio: r }; }); });
+  // Si para cumplir la fecha habría que haber empezado antes de hoy, no cabe
+  const antes = !!o.hoy && desde < o.hoy;
+  return { tasks, desde, hasta, pico, antes, ok: pico.ratio <= TOL && !antes, justo: pico.ratio <= 1 + 1e-9 };
+}
+function buscarEntregas(o) {
+  const res = []; let f = nextLab(o.desde, o.fer);
+  for (let i = 0; i < 60 && res.length < 3; i++, f = nextLab(addDays(f, 1), o.fer)) {
+    const ev = evaluarEntrega(Object.assign({}, o, { entrega: f })); if (!ev) continue;
+    if (ev.ok) res.push({ entrega: f, ev });
+  }
+  return res;
 }
 
 // ── Lotes, fases de cada pieza y métricas del mes ──
@@ -306,7 +411,8 @@ function cargaHoras(tareas, equipo, semanas, soloPendientes) {
   Object.keys(filas).forEach(k => { filas[k] = filas[k].map(x => Math.round(x * 10) / 10); });
   return filas;
 }
-function nivel(n, cap) { if (!cap) return 'na'; const r = n / cap; return r > 1 ? 'over' : (r > 0.7 ? 'warn' : 'ok'); }
+// verde hasta el umbral · amarillo hasta un 10 % más · naranja si se pasa
+function nivel(n, cap, umbral) { if (!cap) return 'na'; const r = n / cap, u = umbral || 0.85; return r > TOL ? 'over' : (r > u + 1e-9 ? 'warn' : 'ok'); }
 // PURE>>
 
 // ═════════ ESTADO ═════════
@@ -319,29 +425,78 @@ const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const FASE_CLASE = { 'En guionización': 'curso', 'Guion en revisión del cliente': 'rev', 'Esperando grabación o material': 'pend', 'En edición': 'curso', 'En control de calidad': 'rev', 'Requiere actualización': 'cambios', 'Listo para entregar': 'azul', 'En revisión del cliente': 'rev', 'Reenviado a revisión': 'rev', 'Aprobado por el cliente': 'listo', 'Completada': 'listo' };
 let S = { equipo: [], etapas: [], tareas: [], clientes: [], cronograma: [], extras: [], config: {}, hoy: '' };
 let CODE = '', YO = '', view = 'dashboard', mes = '', semOff = 0, fP = '', fC = '', pFase = '', pCli = '', genCtx = null, ctxCli = null;
-let sim = { piezas: 20, incl: ['guion', 'edicion'], res: null };
+let sim = { piezas: 20, incl: ['guion', 'edicion'], inv: true, res: null };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const corta = s => { const d = parse(s); return DIAS[d.getDay()] + ' ' + d.getDate() + ' ' + MESES[d.getMonth()]; };
 const dm = s => { const d = parse(s); return d.getDate() + ' ' + MESES[d.getMonth()]; };
+const rango = a => !a ? '—' : (a[0] === a[1] ? dm(a[0]) : dm(a[0]) + ' – ' + dm(a[1]));
 const mesLabel = ym => MESES_L[+ym.slice(5, 7) - 1] + ' ' + ym.slice(0, 4);
-const diaTxt = (f, ym) => (+f.slice(8)) + (f.slice(0, 7) !== ym ? ' ' + MESES[+f.slice(5, 7) - 1] : '');
 const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
 const lsSet = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} };
 const setSync = (st, txt) => { $('dot').className = 'dot' + (st === 'err' ? ' err' : st === 'sync' ? ' sync' : ''); $('estado-sync').textContent = txt; };
 const loading = (on, t) => { $('loading').hidden = !on; if (t) $('loading-txt').textContent = t; };
-const porTurno = () => parseInt(S.config.piezasPorTurno) || 25;
+const FER = () => parseFeriados(S.config.feriados);
+const diasAprob = () => num(S.config.diasAprob, 2);
+const diasGrab = () => num(S.config.diasGrab, 2);
+const umbral = () => num(S.config.umbralCarga, 85) / 100;
 const rondasMax = () => { const v = parseInt(S.config.rondasMax); return isNaN(v) ? 1 : v; };
-const capOf = n => { const p = S.equipo.find(x => x.nombre === n); return p ? (parseFloat(p.horasSemana) || 0) : 0; };
+const persona = n => S.equipo.find(x => x.nombre === n) || null;
+const capSemNom = p => 5 * num(p && p.horasDia, 8) + num(p && p.horasSab, 4);
+const capSem = (n, lun) => capSemana(persona(n), lun, FER());
 const checklistItems = () => String(S.config.checklist || '').split('|').map(s => s.trim()).filter(Boolean);
 const marcados = t => String(t.checklist || '').split('|').filter(Boolean);
 const activos = () => S.clientes.filter(c => c.estado === 'Activo');
-const cronoDe = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { turno: parseInt(r.turno) || 0, aprobador: r.aprobador || '', notas: r.notas || '' }; };
-const itemsTurnos = () => activos().filter(c => cronoDe(c.id).turno && c.piezas > 0).map(c => ({ id: c.id, nombre: c.nombre, turno: cronoDe(c.id).turno, tandas: tandasDe(c.piezas, porTurno()) }));
 const nombreRol = rol => asignar(rol, S.equipo) || '';
 const semanasVista = () => [0, 1, 2, 3, 4, 5].map(i => addDays(lunes(S.hoy), i * 7));
 function semanasDelMes(ym) { const w = []; let s = lunes(ym + '-01'); const fin = ym + '-' + pad(finMes(ym)); while (s <= fin) { w.push(s); s = addDays(s, 7); } return w; }
+
+// Fechas de entrega de cada cliente ("15" o "15,20"): cada una es una tanda
+const cronoDe = id => {
+  const r = S.cronograma.find(x => x.clienteId === id) || {};
+  const entregas = String(r.entregas || '').split(',').map(s => parseInt(s)).filter(n => n >= 1 && n <= 31);
+  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '' };
+};
+const tandasCli = c => Math.max(1, cronoDe(c.id).entregas.length);
+function paramsLote(c, loteId, inv) {
+  const ym = loteId.slice(0, 7), j = +loteId.split('-')[2], cr = cronoDe(c.id);
+  return { entrega: cr.entregas.length ? entregaDelMes(ym, cr.entregas[j - 1]) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: c.incluye || [], etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), investigacion: !!inv && j === 1 };
+}
+// Lo que ya tienen comprometido (tareas pendientes de los demás lotes): el lote nuevo se acomoda en los huecos
+const ocupacionExistente = (clienteId, loteId) => cargaDiaria(S.tareas.filter(x => !(x.clienteId === clienteId && x.ciclo === loteId)), S.equipo, '0000-00-00', '9999-99-99', true);
+const planLote = (c, loteId, inv) => generarLote(Object.assign(paramsLote(c, loteId, inv), { ocup: ocupacionExistente(c.id, loteId) }));
+const infoLote = (c, loteId) => construirPlan(Object.assign(paramsLote(c, loteId, false), { ocup: ocupacionExistente(c.id, loteId) }));
+// Fechas de un lote: las reales si ya está generado; si no, las que saldrían
+function datosLote(c, loteId) {
+  const l = lotes(S.tareas).find(x => x.clienteId === c.id && x.ciclo === loteId);
+  if (!l) return infoLote(c, loteId).plan;
+  const mm = k => { const f = Object.values(l.piezas).map(p => p[k] && p[k].fecha).filter(Boolean).sort(); return f.length ? { ini: f[0], fin: f[f.length - 1] } : null; };
+  const L = l.lote, fer = FER(), ent = L.entrega ? L.entrega.fecha : (L.envioguion ? L.envioguion.fecha : null), mat = L.material || L.grabacion, ap = L.aprobguion ? L.aprobguion.fecha : null, rv = mm('revvideo');
+  return { entrega: ent, wr: mm('guion'), ed: mm('edicion'), envio: L.envioguion ? L.envioguion.fecha : null, aprueba: ap ? [addLab(ap, -(diasAprob() - 1), fer), ap] : null, grab: mat ? [addLab(mat.fecha, -(diasGrab() - 1), fer), mat.fecha] : null, revision: ent && rv ? [addLab(ent, 1, fer), rv.fin] : null };
+}
+// Lotes que todavía no se generaron: se proyectan para ver la carga que ya tienen comprometida
+function proyeccion(ymIni, ymFin) {
+  // en orden de entrega, cada lote se acomoda alrededor de lo real y de los lotes proyectados antes que él
+  const ls = lotes(S.tareas), cand = [], out = [];
+  activos().forEach(c => {
+    const cr = cronoDe(c.id); if (!cr.entregas.length || !c.piezas) return;
+    for (let m = ymIni; m <= ymFin; m = mesAdd(m, 1)) for (let j = 1; j <= cr.entregas.length; j++) {
+      const id = m + '-' + j; if (ls.some(l => l.clienteId === c.id && l.ciclo === id)) continue;
+      cand.push({ c, id, e: paramsLote(c, id, false).entrega });
+    }
+  });
+  cand.sort((a, b) => a.e.localeCompare(b.e));
+  const ocup = cargaDiaria(S.tareas, S.equipo, '0000-00-00', '9999-99-99', true);
+  cand.forEach(x => generarLote(Object.assign(paramsLote(x.c, x.id, false), { ocup })).forEach(t => {
+    const h = num(t.horas, 0); if (h && t.responsable && t.responsable !== 'Cliente') { const o = (ocup[t.responsable] = ocup[t.responsable] || {}); o[t.fecha] = (o[t.fecha] || 0) + h; }
+    if (t.fecha >= S.hoy) out.push(Object.assign({}, t, { clienteId: x.c.id, cliente: x.c.nombre, ciclo: x.id, estado: 'Pendiente', proyectado: true }));
+  }));
+  return out;
+}
+const itemsCapacidad = () => activos().filter(c => c.piezas > 0 && cronoDe(c.id).entregas.length).map(c => ({ piezas: c.piezas, tandas: tandasCli(c), incluye: c.incluye || [] }));
+const capacidadActual = ym => capacidadMes(ym, itemsCapacidad(), S.etapas, S.equipo, FER(), umbral());
+const loteLabel = l => { const c = S.clientes.find(x => x.id === l.clienteId); return l.cliente + (c && tandasCli(c) > 1 ? ', entrega ' + l.ciclo.split('-')[2] : ''); };
 
 // ═════════ API ═════════
 async function api(action, params) {
@@ -369,7 +524,6 @@ async function entrar(c) {
     $('login').hidden = true; $('app').hidden = false;
     $('hoy-label').textContent = corta(S.hoy);
     if (!mes) mes = S.hoy.slice(0, 7);
-    if (!sim.inicio) sim.inicio = S.hoy;
     YO = lsGet('prod_yo');
     nav(); render();
   } catch (e) {
@@ -380,55 +534,29 @@ async function entrar(c) {
 }
 
 // ═════════ NAVEGACIÓN ═════════
-const VISTAS = [['dashboard', 'ti-layout-dashboard', 'Dashboard'], ['turnos', 'ti-layout-columns', 'Turnos'], ['calendario', 'ti-calendar-week', 'Calendario'], ['mis', 'ti-user-check', 'Mis tareas'], ['piezas', 'ti-movie', 'Piezas'], ['carga', 'ti-chart-bar', 'Carga'], ['clientes', 'ti-users', 'Clientes'], ['simulador', 'ti-flask', 'Simulador'], ['ajustes', 'ti-settings', 'Ajustes']];
+const VISTAS = [['dashboard', 'ti-layout-dashboard', 'Dashboard'], ['tablero', 'ti-calendar-stats', 'Tablero'], ['calendario', 'ti-calendar-week', 'Calendario'], ['mis', 'ti-user-check', 'Mis tareas'], ['piezas', 'ti-movie', 'Piezas'], ['carga', 'ti-chart-bar', 'Carga'], ['clientes', 'ti-users', 'Clientes'], ['simulador', 'ti-flask', 'Simulador'], ['ajustes', 'ti-settings', 'Ajustes']];
 function nav() {
   $('nav').innerHTML = VISTAS.map(v => '<button class="' + (view === v[0] ? 'on' : '') + '" data-act="nav" data-v="' + v[0] + '"><i class="ti ' + v[1] + '"></i>' + v[2] + '</button>').join('');
 }
 function render() {
   nav();
-  const f = { dashboard: vDashboard, turnos: vTurnos, calendario: vCalendario, mis: vMis, piezas: vPiezas, carga: vCarga, clientes: vClientes, simulador: vSimulador, ajustes: vAjustes }[view];
+  const f = { dashboard: vDashboard, tablero: vTablero, calendario: vCalendario, mis: vMis, piezas: vPiezas, carga: vCarga, clientes: vClientes, simulador: vSimulador, ajustes: vAjustes }[view];
   $('main').innerHTML = f();
 }
 
 // ═════════ COMPONENTES ═════════
-const loteLabel = l => { const c = S.clientes.find(x => x.id === l.clienteId); const j = l.ciclo.split('-')[2]; return l.cliente + (c && tandasDe(c.piezas, porTurno()) > 1 ? ', tanda ' + j : ''); };
-function htmlTablero(items) {
-  const tb = tablero(items);
-  const celda = (arr, libre) => '<td' + (arr.length > 1 ? ' class="bad"' : (!arr.length && libre ? ' class="free"' : '')) + '>' + (arr.length ? arr.map(n => '<span class="chipc">' + esc(n) + '</span>').join('') : (libre ? libre : '<span class="sub">—</span>')) + '</td>';
-  let h = '<div class="scroll"><table class="tbl tb"><thead><tr><th>Turno</th><th>' + esc(nombreRol('guion') || 'Guion') + ' escribe</th><th>Cliente graba</th><th>' + esc(nombreRol('edicion') || 'Edición') + ' edita</th><th>Se entrega</th></tr></thead><tbody>';
-  for (let k = 1; k <= N_TURNOS; k++) {
-    const r = rangoTurno('2000-01', k);
-    h += '<tr><td><b>T' + k + '</b><br><span class="sub">días ' + r.ini + ' a ' + r.fin + '</span></td>' + celda(tb[k - 1].escribe, 'Turno libre') + celda(tb[k - 1].graba, 'libre') + celda(tb[k - 1].edita, 'libre') + celda(tb[k - 1].entrega, '') + '</tr>';
-  }
-  return h + '</tbody></table></div>';
-}
-function filasFijas(items) {
-  const f = [];
-  items.forEach(c => { for (let j = 1; j <= c.tandas; j++) f.push({ nombre: c.nombre + (c.tandas > 1 ? ', tanda ' + j : ''), w: c.turno + j - 1 }); });
-  const hueco = primerHueco(items, 1);
-  if (hueco) f.push({ nombre: 'Cliente nuevo (turno libre T' + hueco + ')', w: hueco });
-  return f;
-}
-function htmlFijas(ym, filas) {
-  let h = '<div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Recibe guiones</th><th>Aprueba</th><th>Graba</th><th>Entrega material</th><th>Recibe contenido</th></tr></thead><tbody>';
-  filas.forEach(f => {
-    const x = fechasFijas(ym, f.w);
-    h += '<tr><td><b>' + esc(f.nombre) + '</b></td><td>día ' + diaTxt(x.guiones, ym) + '</td><td>' + diaTxt(x.aprueba[0], ym) + ' y ' + diaTxt(x.aprueba[1], ym) + '</td><td>' + diaTxt(x.graba[0], ym) + ' y ' + diaTxt(x.graba[1], ym) + '</td><td>día ' + diaTxt(x.material, ym) + '</td><td>día ' + diaTxt(x.contenido, ym) + '</td></tr>';
-  });
-  return h + '</tbody></table></div>';
-}
 function tablaHoras(filas, semanas, primera) {
-  const nombres = Object.keys(filas).filter(n => n !== 'Sin asignar' && (capOf(n) || filas[n].some(x => x))).concat(filas['Sin asignar'] && filas['Sin asignar'].some(x => x) ? ['Sin asignar'] : []);
+  const nombres = Object.keys(filas).filter(n => n !== 'Sin asignar' && (persona(n) || filas[n].some(x => x))).concat(filas['Sin asignar'] && filas['Sin asignar'].some(x => x) ? ['Sin asignar'] : []);
   let h = '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th>' + semanas.map((s, i) => '<th>' + (i === 0 && primera ? primera : 'sem. ' + dm(s)) + '</th>').join('') + '</tr></thead><tbody>';
   nombres.forEach(n => {
-    const cap = capOf(n);
-    h += '<tr><td>' + esc(n) + '<br><span class="sub">' + (cap ? cap + ' h por semana' : 'sin horas definidas') + '</span></td>' + semanas.map((s, i) => { const v = filas[n][i] || 0; return '<td class="cg cg-' + nivel(v, cap) + '">' + v + ' h' + (cap ? '<small> / ' + cap + '</small>' : '') + '</td>'; }).join('') + '</tr>';
+    const p = persona(n);
+    h += '<tr><td>' + esc(n) + '<br><span class="sub">' + (p ? 'L–V ' + num(p.horasDia, 8) + ' h · sáb ' + num(p.horasSab, 4) + ' h' : 'sin horas definidas') + '</span></td>' + semanas.map((s, i) => { const v = filas[n][i] || 0, cap = p ? capSem(n, s) : 0; return '<td class="cg cg-' + nivel(v, cap, umbral()) + '">' + v + ' h' + (cap ? '<small> / ' + cap + '</small>' : '') + '</td>'; }).join('') + '</tr>';
   });
   return h + '</tbody></table></div>';
 }
 function sobrecargas(filas, semanas) {
   const out = [];
-  Object.keys(filas).forEach(n => { const cap = capOf(n); if (!cap) return; semanas.forEach((s, i) => { if (filas[n][i] > cap) out.push({ n, i, tot: filas[n][i], cap, s }); }); });
+  Object.keys(filas).forEach(n => { const p = persona(n); if (!p) return; semanas.forEach((s, i) => { const cap = capSem(n, s); if (cap && filas[n][i] > cap * TOL) out.push({ n, i, tot: filas[n][i], cap, s }); }); });
   return out;
 }
 function svgBurnup(bu, ym, hoy) {
@@ -446,25 +574,27 @@ function svgBurnup(bu, ym, hoy) {
 }
 const pendientesPipeline = () => { const pip = {}; lotes(S.tareas).forEach(l => Object.values(l.piezas).forEach(p => { const f = faseDe(p, l.lote); pip[f] = (pip[f] || 0) + 1; })); return pip; };
 
+
 // ═════════ DASHBOARD DEL MES ═════════
 function vDashboard() {
-  const ym = mes, R = resumenMes(ym, S.tareas, S.extras, S.hoy), items = itemsTurnos(), occ = ocupacion(items);
-  const usados = Object.keys(occ).length, libres = [1, 2, 3, 4, 5, 6].filter(s => !occ[s]), todos = lotes(S.tareas), max = rondasMax();
+  const ym = mes, R = resumenMes(ym, S.tareas, S.extras, S.hoy), cap = capacidadActual(ym), todos = lotes(S.tareas), max = rondasMax(), hm = S.hoy.slice(0, 7);
   const kpi = (cl, t, v, s) => '<div class="kpi ' + cl + '"><small>' + t + '</small><b>' + v + '</b><span>' + s + '</span></div>';
+  const cuello = cap.filter(x => x.margen !== null).sort((a, b) => a.margen - b.margen)[0];
   let h = '<div class="head"><h2>Dashboard · ' + mesLabel(ym) + '</h2><div class="row"><button class="btn sm" data-act="mes" data-d="-1"><i class="ti ti-chevron-left"></i></button><button class="btn sm" data-act="mes" data-d="0">Este mes</button><button class="btn sm" data-act="mes" data-d="1"><i class="ti ti-chevron-right"></i></button></div></div>';
   const pct = R.plan ? Math.round(R.entregadas / R.plan * 100) : 0;
   h += '<div class="kpis">' +
-    kpi(libres.length === 0 ? 'warn' : 'ok', 'Turnos ocupados', usados + ' de ' + N_TURNOS, libres.length ? 'Libre' + (libres.length > 1 ? 's' : '') + ': ' + libres.map(s => 'T' + s).join(', ') : 'Sin turno libre') +
+    kpi(cuello ? (cuello.margen < 10 ? 'over' : (cuello.margen < 30 ? 'warn' : 'ok')) : '', 'Piezas más que caben al mes', cuello ? '≈ ' + cuello.margen : '—', cuello ? 'cuello de botella: ' + esc(cuello.nombre) + ' (' + Math.round(cuello.pct * 100) + '% ocupado)' : 'faltan fechas de entrega') +
     kpi('', 'Piezas entregadas', R.entregadas + ' / ' + R.plan, pct + '% de lo que se entrega este mes') +
     kpi('', 'Aprobadas por el cliente', R.aprobadas + ' / ' + R.plan, 'de las piezas del mes') +
     kpi(R.aTiempo === null ? '' : (R.aTiempo >= 90 ? 'ok' : (R.aTiempo >= 70 ? 'warn' : 'over')), 'Entregas a tiempo', R.aTiempo === null ? '—' : R.aTiempo + '%', R.aTiempo === null ? 'aún sin entregas' : 'lotes entregados en su fecha') +
     kpi(R.rondas === null ? '' : (R.rondas <= max ? 'ok' : 'over'), 'Rondas por pieza', R.rondas === null ? '—' : R.rondas, 'incluidas en el plan: ' + max) +
     kpi(R.atrasadas === 0 ? 'ok' : (R.atrasadas <= 3 ? 'warn' : 'over'), 'Tareas atrasadas', R.atrasadas, 'del equipo, en los lotes del mes') +
     kpi('', 'Pedidos fuera del plan', R.extras, 'registrados este mes') + '</div>';
-  const al = [];
-  Object.keys(occ).forEach(s => { if (occ[s].length > 1) al.push('<b>T' + s + '</b>: ' + occ[s].map(esc).join(' y ') + ' escriben a la vez. ' + esc(nombreRol('guion') || 'Quien escribe') + ' trabaja un solo cliente por turno.'); });
-  const sinTurno = activos().filter(c => c.piezas > 0 && !cronoDe(c.id).turno);
-  if (sinTurno.length) al.push('Sin turno de escritura: <b>' + sinTurno.map(c => esc(c.nombre)).join(', ') + '</b>. Asígnalo en <b>Turnos</b>.');
+  const al = [], tareasMes = S.tareas.concat(ym >= hm ? proyeccion(ym, ym) : []);
+  const dc = diasCargados(cargaDiaria(tareasMes, S.equipo, ym + '-01', ym + '-' + pad(finMes(ym)), false), S.equipo, FER(), TOL).filter(x => x.sobre);
+  if (dc.length) al.push('<b>Hay días con más trabajo del que alguien puede hacer</b> (revisa el Tablero):<br>' + dc.slice(0, 4).map(x => esc(x.persona) + ': ' + x.horas + ' h el ' + dm(x.fecha) + ' (tiene ' + x.cap + ' h)').join('<br>') + (dc.length > 4 ? '<br>… y ' + (dc.length - 4) + ' más' : ''));
+  const sinFecha = activos().filter(c => c.piezas > 0 && !cronoDe(c.id).entregas.length);
+  if (sinFecha.length) al.push('Sin fecha de entrega: <b>' + sinFecha.map(c => esc(c.nombre)).join(', ') + '</b>. Defínela en <b>Clientes → Fechas y reglas</b>.');
   const sinResp = S.tareas.filter(t => LOTE_RE.test(t.ciclo) && t.estado !== 'Listo' && !t.responsable);
   if (sinResp.length) al.push(sinResp.length + ' tareas sin responsable (' + [...new Set(sinResp.map(t => t.etapaNombre))].slice(0, 3).map(esc).join(', ') + '). Asigna ese rol a alguien en <b>Ajustes</b>.');
   todos.forEach(l => { const n = atrasosCliente(l, S.hoy); if (n) al.push('<b>' + esc(loteLabel(l)) + '</b>: ' + n + ' tarea' + (n > 1 ? 's' : '') + ' del cliente atrasada' + (n > 1 ? 's' : '') + '. Con «Retraso del cliente» (en Clientes) se mueve solo su entrega, nunca la de los demás.'); });
@@ -491,29 +621,47 @@ function vDashboard() {
   const pip = pendientesPipeline(), fk = FASES.filter(f => f !== 'Completada' && pip[f]);
   h += '<div class="card"><h4 style="margin-bottom:8px">Piezas en producción ahora</h4>' + (fk.length ? '<div class="phase-chips">' + fk.map(f => '<button class="pchip" data-act="irFase" data-f="' + esc(f) + '">' + esc(f) + ' · ' + pip[f] + '</button>').join('') + '</div>' : '<div class="empty">No hay piezas en producción</div>') + '</div>';
 
-  const sem = semanasDelMes(ym), filas = cargaHoras(S.tareas, S.equipo, sem, false), so = sobrecargas(filas, sem);
-  h += '<div class="card"><h4 style="margin-bottom:4px">Carga del equipo en el mes (horas planificadas)</h4>' + (so.length ? '<div class="alert r" style="margin:8px 0">' + so.map(x => '<b>' + esc(x.n) + '</b>: ' + x.tot + ' h la semana del ' + dm(x.s) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '') + tablaHoras(filas, sem, '') + '</div>';
+  const filasCap = cap.filter(x => x.cap > 0 && (x.demanda > 0 || x.margen !== null));
+  h += '<div class="card"><h4 style="margin-bottom:4px">Ocupación del equipo en ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">Según las piezas que tienen contratadas los clientes activos y las horas reales de cada persona (lunes a sábado hasta el mediodía, sin feriados). Se planifica hasta el ' + Math.round(umbral() * 100) + '% para dejar espacio a correcciones e imprevistos.</p><div class="scroll"><table class="tbl tb"><thead><tr><th>Persona</th><th>Horas del mes</th><th>Lo que piden los clientes</th><th>Ocupación</th><th>Piezas más que caben</th></tr></thead><tbody>' +
+    filasCap.map(x => '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + x.cap + ' h</td><td>' + x.demanda + ' h</td><td style="min-width:130px"><div class="prog"><i style="width:' + Math.min(100, Math.round(x.pct * 100)) + '%;background:' + (x.pct > umbral() ? '#BF4F26' : '#28a745') + '"></i></div><span class="sub">' + Math.round(x.pct * 100) + '%</span></td><td>' + (x.margen === null ? '<span class="sub">—</span>' : '<b>' + x.margen + '</b>') + '</td></tr>').join('') + '</tbody></table></div></div>';
+
+  const sem = semanasDelMes(ym), filas = cargaHoras(tareasMes, S.equipo, sem, false), so = sobrecargas(filas, sem);
+  h += '<div class="card"><h4 style="margin-bottom:4px">Horas planificadas por semana</h4>' + (so.length ? '<div class="alert r" style="margin:8px 0">' + so.map(x => '<b>' + esc(x.n) + '</b>: ' + x.tot + ' h la semana del ' + dm(x.s) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '') + tablaHoras(filas, sem, '') + '</div>';
 
   const ex = S.extras.filter(x => String(x.fecha).slice(0, 7) === ym);
   h += '<div class="card"><h4 style="margin-bottom:8px">Pedidos fuera del plan (' + ex.length + ')</h4>' + (ex.length ? ex.map(x => '<div class="row" style="border-bottom:1px solid var(--border);padding:6px 0"><span class="badge b-cambios">' + esc(x.tipo) + '</span><b>' + esc(x.cliente) + '</b><span class="sub">' + dm(x.fecha) + ' · ' + esc(x.descripcion) + '</span></div>').join('') : '<div class="empty">Ninguno este mes</div>') + '</div>';
-
-  h += '<div class="card"><h4 style="margin-bottom:8px">Turnos</h4>' + htmlTablero(items) + '</div>';
   return h;
 }
 
-// ═════════ TURNOS ═════════
-function vTurnos() {
-  const ym = mes, items = itemsTurnos(), occ = ocupacion(items), usados = Object.keys(occ).length, libres = [1, 2, 3, 4, 5, 6].filter(s => !occ[s]);
-  let h = '<div class="head"><h2>Turnos · ' + mesLabel(ym) + '</h2><div class="row"><button class="btn sm" data-act="mes" data-d="-1"><i class="ti ti-chevron-left"></i></button><button class="btn sm" data-act="mes" data-d="0">Este mes</button><button class="btn sm" data-act="mes" data-d="1"><i class="ti ti-chevron-right"></i></button></div></div>';
-  h += '<p class="sub" style="margin-bottom:10px">El mes se divide en 6 turnos de 5 días. Cada cliente recorre tres turnos seguidos: escritura, grabación y edición. ' + esc(nombreRol('guion') || 'Quien escribe') + ' escribe para un solo cliente a la vez y ' + esc(nombreRol('edicion') || 'quien edita') + ' edita para un solo cliente a la vez.</p>';
-  h += (libres.length ? '<div class="alert g"><b>' + usados + ' de 6 turnos ocupados.</b> ' + (libres.length === 1 ? 'Queda 1 turno libre (T' + libres[0] + '): cabe un cliente nuevo de hasta ' + porTurno() + ' piezas.' : 'Quedan ' + libres.length + ' turnos libres (' + libres.map(s => 'T' + s).join(', ') + ').') + '</div>' : '<div class="alert r"><b>6 de 6 turnos ocupados.</b> Un cliente más necesita un segundo editor y un séptimo turno.</div>');
-  Object.keys(occ).forEach(s => { if (occ[s].length > 1) h += '<div class="alert r"><b>Choque en T' + s + ':</b> ' + occ[s].map(esc).join(' y ') + ' escriben a la vez.</div>'; });
-  h += '<div class="card"><h4 style="margin-bottom:4px">Turno de escritura de cada cliente</h4><p class="sub" style="margin-bottom:8px">Un cliente de hasta ' + porTurno() + ' piezas al mes ocupa 1 turno; de ' + (porTurno() + 1) + ' a ' + porTurno() * 2 +', 2 turnos seguidos (dos tandas).</p><div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Piezas/mes</th><th>Ocupa</th><th>Turno de escritura</th></tr></thead><tbody>' +
-    activos().map(c => { const t = cronoDe(c.id).turno, tn = tandasDe(c.piezas, porTurno()); return '<tr><td><b>' + esc(c.nombre) + '</b></td><td>' + c.piezas + '</td><td>' + (c.piezas ? tn + ' turno' + (tn > 1 ? 's' : '') : '—') + '</td><td><select data-turno="' + esc(c.id) + '"><option value="">Sin turno</option>' + [1, 2, 3, 4, 5, 6].map(k => { const r = rangoTurno('2000-01', k); return '<option value="' + k + '" ' + (t === k ? 'selected' : '') + '>T' + k + ' (días ' + r.ini + '–' + r.fin + ')</option>'; }).join('') + '</select></td></tr>'; }).join('') +
-    '</tbody></table></div><div style="margin-top:10px"><button class="btn sm p" data-act="turnos-save"><i class="ti ti-device-floppy"></i>Guardar turnos</button></div></div>';
-  h += '<div class="card"><h4 style="margin-bottom:8px">Qué pasa en cada turno</h4>' + htmlTablero(items) + '</div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Fechas fijas de cada cliente · ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">Estas fechas se comunican al cliente y van en el anexo de su contrato. Su mes de servicio empieza el día que recibe su contenido.</p>' + htmlFijas(ym, filasFijas(items)) + '</div>';
-  h += '<div class="alert i"><b>Reglas del sistema:</b> un retraso no se contagia (si un cliente no aprueba o no graba a tiempo, se mueve solo su entrega) · si una fecha cae en domingo, se adelanta · antes de ofrecer un cupo, revisa cuántos turnos quedan libres.</div>';
+// ═════════ TABLERO: quién trabaja cuántas horas cada día ═════════
+function vTablero() {
+  const ym = mes, n = finMes(ym), fer = FER(), hm = S.hoy.slice(0, 7);
+  const tareas = S.tareas.concat(ym >= hm ? proyeccion(ym, ym) : []);
+  const carga = cargaDiaria(tareas, S.equipo, ym + '-01', ym + '-' + pad(n), false), det = {};
+  tareas.forEach(t => { if (!t.responsable || t.responsable === 'Cliente' || !num(t.horas, 0) || t.fecha.slice(0, 7) !== ym) return; const k = t.responsable + '|' + t.fecha, nm = t.cliente.split(' - ')[0] + ' · ' + t.etapaNombre.split(' (')[0]; (det[k] = det[k] || {})[nm] = (det[k][nm] || 0) + 1; });
+  const gente = S.equipo.filter(p => p.activo !== 'NO' && num(p.horasDia, 8) > 0);
+  let h = '<div class="head"><h2>Tablero · ' + mesLabel(ym) + '</h2><div class="row"><button class="btn sm" data-act="mes" data-d="-1"><i class="ti ti-chevron-left"></i></button><button class="btn sm" data-act="mes" data-d="0">Este mes</button><button class="btn sm" data-act="mes" data-d="1"><i class="ti ti-chevron-right"></i></button></div></div>';
+  h += '<p class="sub" style="margin-bottom:10px">Cada celda son las horas de trabajo planificadas de esa persona ese día frente a las horas que tiene (lunes a viernes y sábado hasta el mediodía; sin domingos ni feriados). <span class="badge cg-ok">dentro de sus horas</span> <span class="badge cg-warn">un poco justo</span> <span class="badge cg-over">no alcanza</span>' + (ym >= hm ? ' Incluye lo que ya está comprometido aunque todavía no hayas generado el lote.' : '') + '</p>';
+  h += '<div class="card"><div class="scroll"><table class="heat"><thead><tr><th class="who"></th>' + Array.from({ length: n }, (_, i) => { const f = ym + '-' + pad(i + 1), w = parse(f).getDay(); return '<th class="' + (!esLab(f, fer) ? 'off' : '') + (f === S.hoy ? ' hoy' : '') + '">' + 'DLMMJVS'[w] + '<br>' + (i + 1) + '</th>'; }).join('') + '<th>Horas</th></tr></thead><tbody>' +
+    gente.map(p => {
+      let tot = 0;
+      const celdas = Array.from({ length: n }, (_, i) => {
+        const f = ym + '-' + pad(i + 1), cap = horasDelDia(p, f, fer), hoyC = f === S.hoy ? ' hoy' : '';
+        if (!cap) return '<td class="off' + hoyC + '"></td>';
+        const v = (carga[p.nombre] || {})[f] || 0; tot += v;
+        const dd = det[p.nombre + '|' + f], tt = dd ? Object.keys(dd).map(k => k + (dd[k] > 1 ? ' ×' + dd[k] : '')).join(', ') : 'libre';
+        return '<td class="c' + (v ? ' cg-' + nivel(v, cap, 1.0) : '') + hoyC + '" title="' + esc(p.nombre + ' · ' + dm(f) + ' · ' + Math.round(v * 10) / 10 + ' h de ' + cap + ' h · ' + tt) + '">' + (v ? Math.round(v * 10) / 10 : '') + '</td>';
+      }).join('');
+      return '<tr><td class="who"><b>' + esc(p.nombre) + '</b><br><span class="sub">' + num(p.horasDia, 8) + ' h · sáb ' + num(p.horasSab, 4) + ' h</span></td>' + celdas + '<td class="tot">' + Math.round(tot * 10) / 10 + ' h<br><span class="sub">de ' + capMes(p, ym, fer) + '</span></td></tr>';
+    }).join('') + '</tbody></table></div><p class="sub" style="margin-top:8px">Pasa el cursor (o toca) sobre una celda para ver qué clientes y etapas son.</p></div>';
+
+  const filas = [];
+  activos().forEach(c => { const cr = cronoDe(c.id); if (!c.piezas || !cr.entregas.length) return; for (let j = 1; j <= cr.entregas.length; j++) { const id = ym + '-' + j, pl = datosLote(c, id), ll = lotes(S.tareas).find(x => x.clienteId === c.id && x.ciclo === id); if (pl) filas.push({ nombre: c.nombre + (cr.entregas.length > 1 ? ', entrega ' + j : ''), pl, n: ll ? ll.n : piezasTanda(c.piezas, cr.entregas.length, j) }); } });
+  filas.sort((a, b) => a.pl.entrega.localeCompare(b.pl.entrega));
+  h += '<div class="card"><h4 style="margin-bottom:4px">Fechas de cada cliente · ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">La fecha de entrega es fija (por contrato). Todo lo anterior se calcula hacia atrás con las horas de cada persona y el calendario real. Sirven para el anexo del contrato.</p>' +
+    (filas.length ? '<div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Piezas</th><th>Escribe</th><th>Envía guiones</th><th>Cliente aprueba</th><th>Cliente graba</th><th>Edita</th><th>Entrega</th><th>Cliente revisa</th></tr></thead><tbody>' +
+      filas.map(f => '<tr><td><b>' + esc(f.nombre) + '</b></td><td>' + f.n + '</td><td>' + rango(f.pl.wr ? [f.pl.wr.ini, f.pl.wr.fin] : null) + '</td><td>' + (f.pl.envio ? dm(f.pl.envio) : '—') + '</td><td>' + rango(f.pl.aprueba) + '</td><td>' + rango(f.pl.grab) + '</td><td>' + rango(f.pl.ed ? [f.pl.ed.ini, f.pl.ed.fin] : null) + '</td><td><b>' + dm(f.pl.entrega) + '</b></td><td>' + rango(f.pl.revision) + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="empty">Ningún cliente tiene fecha de entrega. Defínelas en <b>Clientes</b>.</div>') + '</div>';
+  h += '<div class="alert i"><b>Cómo leerlo:</b> si dos clientes se pisan, el día sale en naranja. Cambia la fecha de entrega de uno en <b>Clientes → Fechas y reglas</b> o usa el <b>Simulador</b> para ver qué fecha libre hay. Un retraso del cliente se registra en su lote y mueve solo su entrega.</div>';
   return h;
 }
 
@@ -553,8 +701,8 @@ function vMis() {
   const mine = S.tareas.filter(t => t.responsable === YO && t.estado !== 'Listo').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.cliente.localeCompare(b.cliente));
   const finSem = addDays(lunes(S.hoy), 7), fin3 = addDays(lunes(S.hoy), 28);
   const grupos = [['Atrasadas', mine.filter(t => t.fecha < S.hoy)], ['Esta semana', mine.filter(t => t.fecha >= S.hoy && t.fecha < finSem)], ['Próximas 3 semanas', mine.filter(t => t.fecha >= finSem && t.fecha < fin3)]];
-  const horas = Math.round(mine.reduce((a, t) => a + (parseFloat(t.horas) || 0), 0) * 10) / 10, cap = capOf(YO);
-  h += '<div class="alert i">' + mine.length + ' tarea' + (mine.length === 1 ? '' : 's') + ' pendiente' + (mine.length === 1 ? '' : 's') + ' · ' + horas + ' h estimadas' + (cap ? ' · tienes ' + cap + ' h por semana' : '') + '</div>';
+  const horas = Math.round(mine.reduce((a, t) => a + (parseFloat(t.horas) || 0), 0) * 10) / 10, cap = persona(YO) ? capSemNom(persona(YO)) : 0;
+  h += '<div class="alert i">' + mine.length + ' tarea' + (mine.length === 1 ? '' : 's') + ' pendiente' + (mine.length === 1 ? '' : 's') + ' · ' + horas + ' h estimadas' + (cap ? ' · tienes ' + cap + ' h por semana (L–V ' + num(persona(YO).horasDia, 8) + ' h, sáb ' + num(persona(YO).horasSab, 4) + ' h)' : '') + '</div>';
   grupos.forEach(g => {
     if (!g[1].length) return;
     h += '<div class="card"><h4 style="margin-bottom:8px">' + g[0] + ' (' + g[1].length + ')</h4>' + g[1].map(t =>
@@ -599,12 +747,12 @@ function vPiezas() {
 
 // ═════════ CARGA ═════════
 function vCarga() {
-  const sem = semanasVista(), filas = cargaHoras(S.tareas, S.equipo, sem, true), so = sobrecargas(filas, sem);
+  const hm = S.hoy.slice(0, 7), sem = semanasVista(), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 1))), filas = cargaHoras(tareas, S.equipo, sem, true), so = sobrecargas(filas, sem);
   let h = '<div class="head"><h2>Carga por persona</h2></div>';
-  h += '<p class="sub" style="margin-bottom:10px">Horas pendientes por semana frente a las horas que tiene cada persona. Las atrasadas se cuentan en «Esta semana». Las tareas del cliente no cargan al equipo. Verde: holgado · Amarillo: más del 70% · Naranja: se pasa.</p>';
-  h += so.length ? '<div class="alert r"><b>Atención:</b><br>' + so.map(x => esc(x.n) + ': ' + x.tot + ' h la semana ' + (x.i === 0 ? 'actual' : 'del ' + dm(x.s)) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : (S.tareas.length ? '<div class="alert g">Nadie se pasa de sus horas en las próximas 6 semanas.</div>' : '');
+  h += '<p class="sub" style="margin-bottom:10px">Horas pendientes por semana frente a las horas reales de cada persona (se descuentan los feriados). Incluye lo comprometido aunque el lote no esté generado. Las atrasadas se cuentan en «Esta semana». Las tareas del cliente no cargan al equipo. Verde: dentro del ' + Math.round(umbral() * 100) + '% · Amarillo: justo · Naranja: no alcanza.</p>';
+  h += so.length ? '<div class="alert r"><b>Atención:</b><br>' + so.map(x => esc(x.n) + ': ' + x.tot + ' h la semana ' + (x.i === 0 ? 'actual' : 'del ' + dm(x.s)) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '<div class="alert g">Nadie se pasa de sus horas en las próximas 6 semanas.</div>';
   h += '<div class="card">' + tablaHoras(filas, sem, 'Esta semana') + '</div>';
-  h += '<p class="sub">Las horas por tarea y las horas de cada persona se ajustan en <b>Ajustes</b>.</p>';
+  h += '<p class="sub">Las horas de cada persona y las horas por tarea se ajustan en <b>Ajustes</b>.</p>';
   return h;
 }
 
@@ -615,35 +763,28 @@ function mesesDe(c) {
   lotes(S.tareas).filter(l => l.clienteId === c.id).forEach(l => { if (l.tareas.some(t => t.estado !== 'Listo') || fechaEntrega(l) >= addDays(S.hoy, -20)) set[l.ciclo.slice(0, 7)] = 1; });
   return Object.keys(set).sort();
 }
-function planLote(c, loteId, inv) {
-  const j = +loteId.split('-')[2];
-  return generarLote({ ym: loteId.slice(0, 7), turno: cronoDe(c.id).turno, tanda: j, tandas: tandasDe(c.piezas, porTurno()), piezas: c.piezas, incluye: c.incluye || [], etapas: S.etapas, equipo: S.equipo, investigacion: inv && j === 1 });
-}
 function vClientes() {
   const cl = activos(), ls = lotes(S.tareas), hm = S.hoy.slice(0, 7);
-  let h = '<div class="head"><h2>Clientes activos</h2><span class="sub">Piezas y servicios vienen del CRM; el turno, de aquí</span></div>';
+  let h = '<div class="head"><h2>Clientes activos</h2><div class="row"><button class="btn sm p" data-act="gen-mes" data-m="' + hm + '"><i class="ti ti-wand"></i>Generar lotes de ' + MESES_L[+hm.slice(5, 7) - 1] + '</button><button class="btn sm" data-act="gen-mes" data-m="' + mesAdd(hm, 1) + '"><i class="ti ti-wand"></i>' + MESES_L[+mesAdd(hm, 1).slice(5, 7) - 1] + '</button></div></div><p class="sub" style="margin-bottom:10px">Piezas y servicios vienen del CRM; las fechas de entrega, de aquí. Cada lote se acomoda en los huecos que dejan los demás.</p>';
   if (!cl.length) return h + '<div class="empty">No hay clientes activos en el CRM</div>';
   h += '<div class="grid2">' + cl.map(c => {
-    const cr = cronoDe(c.id), tn = tandasDe(c.piezas, porTurno()), contenido = (c.incluye || []).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0);
+    const cr = cronoDe(c.id), tn = tandasCli(c), contenido = (c.incluye || []).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0);
     let cuerpo = '';
     if (!c.piezas) cuerpo = '<div class="alert w" style="margin:10px 0 0">Falta cargar las piezas por mes en el CRM (Editar cliente).</div>';
     else if (!contenido) cuerpo = '<div class="alert i" style="margin:10px 0 0">No incluye guion, grabación ni edición: no genera lotes de contenido.</div>';
-    else if (!cr.turno) cuerpo = '<div class="alert w" style="margin:10px 0 0">Sin turno de escritura. Asígnalo en «Turno y reglas» o en la pantalla Turnos.</div>';
-    else {
-      const f = fechasFijas(hm, cr.turno);
-      cuerpo = '<div class="sub" style="margin-top:8px">Fechas fijas: guiones día ' + diaTxt(f.guiones, hm) + ' · aprueba ' + diaTxt(f.aprueba[0], hm) + ' y ' + diaTxt(f.aprueba[1], hm) + ' · graba ' + diaTxt(f.graba[0], hm) + ' y ' + diaTxt(f.graba[1], hm) + ' · material día ' + diaTxt(f.material, hm) + ' · contenido día ' + diaTxt(f.contenido, hm) + '</div>';
-      cuerpo += mesesDe(c).map(m => { let s = ''; for (let j = 1; j <= tn; j++) {
-        const id = m + '-' + j, l = ls.find(x => x.clienteId === c.id && x.ciclo === id), w = cr.turno + j - 1, n = piezasTanda(c.piezas, tn, j), e = rangoTurno(m, w), d = rangoTurno(m, w + 2);
-        s += '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>' + mesLabel(m) + (tn > 1 ? ' · tanda ' + j : '') + '</b><span class="sub">' + n + ' piezas</span></div><div class="sub">Escribe del ' + dm(e.desde) + ' al ' + dm(e.hasta) + ' → entrega el ' + dm(d.hasta) + '</div>';
-        if (l) {
-          const hechas = l.tareas.filter(t => t.estado === 'Listo').length;
-          s += '<div class="prog"><i style="width:' + Math.round(hechas / l.tareas.length * 100) + '%"></i></div><div class="sub">' + hechas + ' de ' + l.tareas.length + ' tareas listas</div><div class="row" style="gap:4px;margin:6px 0">' + Object.values(l.lote).sort((a, b) => a.fecha.localeCompare(b.fecha)).map(t => '<span class="lchip t-' + SLUG[t.estado] + '" data-act="tarea" data-id="' + esc(t.id) + '">' + esc(t.etapaNombre.split(' (')[0]) + ' · ' + dm(t.fecha) + '</span>').join('') + '</div>' +
-            '<div class="row"><button class="btn sm" data-act="gen" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-wand"></i>Completar</button><button class="btn sm" data-act="retraso" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-clock-pause"></i>Retraso del cliente</button><button class="btn sm d" data-act="borrarlote" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-trash"></i></button></div>';
-        } else s += '<div class="row" style="margin-top:6px"><button class="btn sm p" data-act="gen" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-wand"></i>Generar lote</button></div>';
-        s += '</div>'; } return s; }).join('');
-    }
+    else if (!cr.entregas.length) cuerpo = '<div class="alert w" style="margin:10px 0 0">Sin fecha de entrega. Defínela en «Fechas y reglas».</div>';
+    else cuerpo = mesesDe(c).map(m => { let s = ''; for (let j = 1; j <= tn; j++) {
+      const id = m + '-' + j, l = ls.find(x => x.clienteId === c.id && x.ciclo === id), pl = datosLote(c, id), n = piezasTanda(c.piezas, tn, j);
+      s += '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>' + mesLabel(m) + (tn > 1 ? ' · entrega ' + j : '') + '</b><span class="sub">' + n + ' piezas</span></div>' +
+        (pl ? '<div class="sub">' + (pl.wr ? 'Escribe ' + rango([pl.wr.ini, pl.wr.fin]) + ' · ' : '') + (pl.ed ? 'edita ' + rango([pl.ed.ini, pl.ed.fin]) + ' · ' : '') + 'entrega el <b>' + dm(pl.entrega) + '</b></div>' : '');
+      if (l) {
+        const hechas = l.tareas.filter(t => t.estado === 'Listo').length;
+        s += '<div class="prog"><i style="width:' + Math.round(hechas / l.tareas.length * 100) + '%"></i></div><div class="sub">' + hechas + ' de ' + l.tareas.length + ' tareas listas</div><div class="row" style="gap:4px;margin:6px 0">' + Object.values(l.lote).sort((a, b) => a.fecha.localeCompare(b.fecha)).map(t => '<span class="lchip t-' + SLUG[t.estado] + '" data-act="tarea" data-id="' + esc(t.id) + '">' + esc(t.etapaNombre.split(' (')[0]) + ' · ' + dm(t.fecha) + '</span>').join('') + '</div>' +
+          '<div class="row"><button class="btn sm" data-act="gen" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-wand"></i>Completar</button><button class="btn sm" data-act="retraso" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-clock-pause"></i>Retraso del cliente</button><button class="btn sm d" data-act="borrarlote" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-trash"></i></button></div>';
+      } else s += '<div class="row" style="margin-top:6px"><button class="btn sm p" data-act="gen" data-id="' + esc(c.id) + '" data-ciclo="' + id + '"><i class="ti ti-wand"></i>Generar lote</button></div>';
+      s += '</div>'; } return s; }).join('');
     const nx = S.extras.filter(x => x.clienteId === c.id && String(x.fecha).slice(0, 7) === hm).length;
-    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="turno" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Turno y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span><span class="badge b-vino">' + tn + ' turno' + (tn > 1 ? 's' : '') + '</span>' + (cr.turno ? '<span class="badge b-listo">Escribe en T' + cr.turno + '</span>' : '') + '</div>' + (cr.aprobador ? '<div class="sub" style="margin-top:6px">Aprueba: ' + esc(cr.aprobador) + '</div>' : '') + cuerpo +
+    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="fechas" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Fechas y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span>' + (cr.entregas.length ? '<span class="badge b-listo">Entrega el ' + cr.entregas.join(' y ') + '</span>' : '') + '</div>' + (cr.aprobador ? '<div class="sub" style="margin-top:6px">Aprueba: ' + esc(cr.aprobador) + '</div>' : '') + cuerpo +
       '<div class="row" style="margin-top:12px;justify-content:space-between;border-top:1px solid var(--border);padding-top:10px"><span class="sub">Pedidos fuera del plan este mes: ' + nx + '</span><button class="btn sm" data-act="extra" data-id="' + esc(c.id) + '"><i class="ti ti-plus"></i>Registrar pedido</button></div></div>';
   }).join('') + '</div>';
   return h;
@@ -651,9 +792,9 @@ function vClientes() {
 function abrirGen(id, loteId) {
   const c = S.clientes.find(x => x.id === id); if (!c) return;
   genCtx = { id, loteId };
-  const primero = !lotes(S.tareas).some(l => l.clienteId === id), plan = planLote(c, loteId, false), ini = plan.map(t => t.fecha).sort()[0] || S.hoy;
-  openModal('<h3>Lote · ' + esc(c.nombre) + '</h3><div class="sub">' + mesLabel(loteId.slice(0, 7)) + ' · tanda ' + loteId.split('-')[2] + ' · ' + piezasTanda(c.piezas, tandasDe(c.piezas, porTurno()), +loteId.split('-')[2]) + ' piezas · escribe en T' + (cronoDe(id).turno + (+loteId.split('-')[2]) - 1) + '</div>' +
-    (loteId.endsWith('-1') ? '<label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="g-inv" style="width:auto" ' + (primero ? 'checked' : '') + '> Incluir la investigación inicial (hallazgos y brief)</label>' : '<input type="checkbox" id="g-inv" hidden>') +
+  const primero = !lotes(S.tareas).some(l => l.clienteId === id), plan = planLote(c, loteId, false), ini = plan.map(t => t.fecha).sort()[0] || S.hoy, pl = infoLote(c, loteId).plan, j = +loteId.split('-')[2];
+  openModal('<h3>Lote · ' + esc(c.nombre) + '</h3><div class="sub">' + mesLabel(loteId.slice(0, 7)) + (tandasCli(c) > 1 ? ' · entrega ' + j : '') + ' · ' + piezasTanda(c.piezas, tandasCli(c), j) + ' piezas' + (pl ? ' · entrega el ' + dm(pl.entrega) : '') + '</div>' +
+    (j === 1 ? '<label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="g-inv" style="width:auto" ' + (primero ? 'checked' : '') + '> Incluir la investigación inicial (hallazgos y brief)</label>' : '<input type="checkbox" id="g-inv" hidden>') +
     '<label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="g-pas" style="width:auto" ' + (ini < S.hoy ? 'checked' : '') + '> Dar por hechas las tareas anteriores a hoy</label>' +
     '<div class="alert i" id="g-prev" style="margin-top:12px"></div><div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="gen-ok">Crear tareas</button></div>');
   prevGen();
@@ -662,18 +803,36 @@ function prevGen() {
   if (!$('g-prev')) return;
   const c = S.clientes.find(x => x.id === genCtx.id), plan = planLote(c, genCtx.loteId, $('g-inv').checked);
   const pas = $('g-pas').checked ? plan.filter(t => t.fecha < S.hoy).length : 0, horas = Math.round(plan.reduce((a, t) => a + (t.responsable === 'Cliente' ? 0 : t.horas), 0) * 10) / 10;
-  $('g-prev').innerHTML = 'Se crearán hasta <b>' + plan.length + ' tareas</b>' + (pas ? ' (' + pas + ' ya quedan como listas)' : '') + ' · <b>' + horas + ' h</b> de trabajo del equipo. Las que ya existan no se duplican.';
+  const ini = plan.map(t => t.fecha).sort()[0] || S.hoy;
+  $('g-prev').innerHTML = 'Se crearán hasta <b>' + plan.length + ' tareas</b>' + (pas ? ' (' + pas + ' ya quedan como listas)' : '') + ' · <b>' + horas + ' h</b> de trabajo del equipo. Las que ya existan no se duplican.' + (ini < S.hoy ? '<br><b>Empieza el ' + dm(ini) + '</b>, antes de hoy. Si es trabajo nuevo, conviene mover la fecha de entrega.' : '');
 }
 async function confirmarGen() {
   const c = S.clientes.find(x => x.id === genCtx.id), plan = planLote(c, genCtx.loteId, $('g-inv').checked), pas = $('g-pas').checked, loteId = genCtx.loteId;
   closeModal(); loading(true, 'Creando tareas…');
   try {
-    for (let i = 0; i < plan.length; i += 30) {
-      const r = await api('addTareas', { d: { clienteId: c.id, cliente: c.nombre, ciclo: loteId, pasadasListo: pas, t: plan.slice(i, i + 30).map(x => [x.pieza, x.etapa, x.fecha, x.responsable, x.horas]) } });
+    for (let i = 0; i < plan.length; i += 20) {
+      const r = await api('addTareas', { d: { clienteId: c.id, cliente: c.nombre, ciclo: loteId, pasadasListo: pas, t: plan.slice(i, i + 20).map(x => [x.pieza, x.etapa, x.fecha, x.responsable, x.horas]) } });
       if (!r.ok) throw new Error(r.error);
     }
     await cargar(); render();
   } catch (e) { alert('No se pudo crear el lote: ' + e.message); setSync('err', 'Error'); }
+  loading(false);
+}
+async function genMes(ym) {
+  const ls = lotes(S.tareas), pend = [];
+  activos().forEach(c => { const cr = cronoDe(c.id); if (!cr.entregas.length || !c.piezas || !(c.incluye || []).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0)) return; for (let j = 1; j <= cr.entregas.length; j++) { const id = ym + '-' + j; if (!ls.some(l => l.clienteId === c.id && l.ciclo === id)) pend.push({ c, id, e: paramsLote(c, id, false).entrega }); } });
+  if (!pend.length) { alert('Todos los lotes de ' + mesLabel(ym) + ' ya están generados.'); return; }
+  pend.sort((a, b) => a.e.localeCompare(b.e));
+  if (!confirm('Se generarán ' + pend.length + ' lote' + (pend.length > 1 ? 's' : '') + ' de ' + mesLabel(ym) + ', en orden de entrega, acomodando cada uno en los huecos que dejan los demás. Se dan por hechas las tareas anteriores a hoy. No incluye la investigación inicial (para un cliente nuevo, genera su primer lote desde su tarjeta). ¿Continuar?')) return;
+  loading(true, 'Generando lotes…');
+  try {
+    for (const x of pend) {
+      const plan = planLote(x.c, x.id, false);
+      for (let i = 0; i < plan.length; i += 20) { const r = await api('addTareas', { d: { clienteId: x.c.id, cliente: x.c.nombre, ciclo: x.id, pasadasListo: true, t: plan.slice(i, i + 20).map(y => [y.pieza, y.etapa, y.fecha, y.responsable, y.horas]) } }); if (!r.ok) throw new Error(r.error); }
+      await cargar();
+    }
+    render();
+  } catch (e) { alert('No se pudo generar: ' + e.message); setSync('err', 'Error'); }
   loading(false);
 }
 async function borrarLote(id, loteId) {
@@ -686,7 +845,7 @@ async function borrarLote(id, loteId) {
 function abrirRetraso(id, loteId) {
   const l = lotes(S.tareas).find(x => x.clienteId === id && x.ciclo === loteId); if (!l) return;
   genCtx = { id, loteId };
-  openModal('<h3>Retraso del cliente</h3><div class="sub">' + esc(loteLabel(l)) + ' · ' + mesLabel(loteId.slice(0, 7)) + '</div><p class="sub" style="margin:10px 0">Si el cliente no aprobó o no grabó a tiempo, se mueve <b>solo su entrega</b>: las ' + l.tareas.filter(t => t.estado !== 'Listo').length + ' tareas pendientes de este lote. Nunca se mueven las de otros clientes.</p><label class="l">¿Cuántos días se atrasó?</label><input type="number" id="r-dias" min="1" value="2"><div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="retraso-ok">Mover fechas</button></div>');
+  openModal('<h3>Retraso del cliente</h3><div class="sub">' + esc(loteLabel(l)) + ' · ' + mesLabel(loteId.slice(0, 7)) + '</div><p class="sub" style="margin:10px 0">Si el cliente no aprobó o no grabó a tiempo, se mueve <b>solo su entrega</b>: las ' + l.tareas.filter(t => t.estado !== 'Listo').length + ' tareas pendientes de este lote, en días laborables (sin domingos ni feriados). Nunca se mueven las de otros clientes.</p><label class="l">¿Cuántos días laborables se atrasó?</label><input type="number" id="r-dias" min="1" value="2"><div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="retraso-ok">Mover fechas</button></div>');
 }
 async function confirmarRetraso() {
   const dias = parseInt($('r-dias').value) || 0; if (dias < 1) { alert('Indica cuántos días'); return; }
@@ -694,25 +853,21 @@ async function confirmarRetraso() {
   try { const r = await api('moverFechas', { d: { clienteId: c.id, ciclo: c.loteId, dias } }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
 }
-function abrirTurno(id) {
+function abrirFechas(id) {
   const c = S.clientes.find(x => x.id === id); if (!c) return;
   const cr = cronoDe(id); ctxCli = id;
-  openModal('<h3>Turno y reglas · ' + esc(c.nombre) + '</h3><div class="sub">' + c.piezas + ' piezas al mes = ' + tandasDe(c.piezas, porTurno()) + ' turno(s)</div>' +
-    '<label class="l">Turno de escritura</label><select id="t-turno"><option value="">Sin turno</option>' + [1, 2, 3, 4, 5, 6].map(k => { const r = rangoTurno('2000-01', k); return '<option value="' + k + '" ' + (cr.turno === k ? 'selected' : '') + '>T' + k + ' (días ' + r.ini + ' a ' + r.fin + ')</option>'; }).join('') + '</select>' +
-    '<label class="l">Quién aprueba de su lado</label><input id="t-aprob" value="' + esc(cr.aprobador) + '"><label class="l">Notas (canal de aprobación, horarios, cuándo graba…)</label><textarea id="t-notas" rows="2">' + esc(cr.notas) + '</textarea>' +
-    '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="turno-ok">Guardar</button></div>');
+  openModal('<h3>Fechas y reglas · ' + esc(c.nombre) + '</h3><div class="sub">' + c.piezas + ' piezas al mes</div>' +
+    '<label class="l">Días del mes en que recibe su contenido</label><input id="f-entregas" value="' + esc(cr.entregas.join(', ')) + '" placeholder="Ej: 15  o  15, 20">' +
+    '<div class="sub" style="margin-top:4px">Es la fecha fija de su contrato. Si le entregas en dos tandas, pon los dos días separados por coma: cada tanda lleva la mitad de las piezas. Todo lo demás (escritura, aprobación, edición) se calcula hacia atrás.</div>' +
+    '<label class="l">Quién aprueba de su lado</label><input id="f-aprob" value="' + esc(cr.aprobador) + '"><label class="l">Notas (canal de aprobación, horarios, cuándo graba…)</label><textarea id="f-notas" rows="2">' + esc(cr.notas) + '</textarea>' +
+    '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="fechas-ok">Guardar</button></div>');
 }
-async function guardarTurno() {
-  const d = { clienteId: ctxCli, turno: $('t-turno').value, aprobador: $('t-aprob').value.trim(), notas: $('t-notas').value.trim() };
+async function guardarFechas() {
+  const txt = $('f-entregas').value.trim(), nums = txt ? txt.split(',').map(s => parseInt(s)) : [];
+  if (txt && nums.some(n => !(n >= 1 && n <= 31))) { alert('Escribe días del mes entre 1 y 31, separados por coma. Ej: 15, 20'); return; }
+  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim() };
   closeModal(); loading(true, 'Guardando…');
   try { const r = await api('saveCronograma', { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
-  loading(false);
-}
-async function guardarTurnos() {
-  const cambios = Array.from(document.querySelectorAll('select[data-turno]')).filter(s => (parseInt(s.value) || 0) !== cronoDe(s.dataset.turno).turno);
-  if (!cambios.length) { alert('No hay cambios que guardar'); return; }
-  loading(true, 'Guardando turnos…');
-  try { for (const s of cambios) { const cr = cronoDe(s.dataset.turno); const r = await api('saveCronograma', { d: { clienteId: s.dataset.turno, turno: s.value, aprobador: cr.aprobador, notas: cr.notas } }); if (!r.ok) throw new Error(r.error); } await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
 }
 function abrirExtra(id) {
@@ -726,45 +881,50 @@ async function guardarExtra(desc, tipo, cid) {
 }
 
 // ═════════ SIMULADOR ═════════
+const planSim = f => construirPlan({ entrega: f, tanda: 1, tandas: 1, piezas: sim.piezas, incluye: sim.incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), investigacion: sim.inv }).plan;
 function calcSim() {
-  const incl = Array.from(document.querySelectorAll('#sim-incl input:checked')).map(i => i.value), piezas = parseInt($('sim-piezas').value) || 0;
-  sim = { piezas, incl, res: null };
+  const incl = Array.from(document.querySelectorAll('#sim-incl input:checked')).map(i => i.value), piezas = parseInt($('sim-piezas').value) || 0, inv = $('sim-inv').checked;
+  sim = { piezas, incl, inv, res: null };
   if (piezas > 0) {
-    const items = itemsTurnos(), tn = tandasDe(piezas, porTurno()), s = primerHueco(items, tn), libres = N_TURNOS - Object.keys(ocupacion(items)).length, horas = {};
-    for (let j = 1; j <= tn; j++) { const hj = {}; generarLote({ ym: S.hoy.slice(0, 7), turno: s || 1, tanda: j, tandas: tn, piezas, incluye: incl, etapas: S.etapas, equipo: S.equipo, investigacion: j === 1 }).forEach(t => { if (t.responsable === 'Cliente') return; const k = t.responsable || 'Sin asignar'; hj[k] = (hj[k] || 0) + t.horas; }); Object.keys(hj).forEach(k => { horas[k] = Math.max(horas[k] || 0, hj[k]); }); }
-    sim.res = { tn, s, libres, horas };
+    const hm = S.hoy.slice(0, 7), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 2)));
+    const found = buscarEntregas({ desde: S.hoy, hoy: S.hoy, piezas, incluye: incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), tareas, umbral: umbral(), investigacion: inv });
+    sim.res = { found, cap: capacidadActual(hm).filter(x => x.margen !== null).sort((a, b) => a.margen - b.margen) };
   }
   render();
 }
 function vSimulador() {
-  let h = '<div class="head"><h2>Simulador de nuevos clientes</h2></div><p class="sub" style="margin-bottom:10px">Antes de ofrecer un cupo: ¿cuántos turnos ocuparía y hay lugar? Se calcula con los turnos de hoy, igual que en el Sistema de turnos.</p>';
-  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div></div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
+  let h = '<div class="head"><h2>Simulador de nuevos clientes</h2></div><p class="sub" style="margin-bottom:10px">Antes de ofrecer un cupo: ¿en qué fecha podría recibir su contenido sin que nadie se pase de sus horas? Se suma su trabajo a todo lo que ya está comprometido.</p>';
+  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div></div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sim-inv" style="width:auto" ' + (sim.inv ? 'checked' : '') + '> Incluir la investigación inicial (8 h de Alejandra)</label><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
   if (sim.res) {
-    const r = sim.res;
-    h += '<div class="alert i">' + sim.piezas + ' piezas al mes = <b>' + r.tn + ' turno' + (r.tn > 1 ? 's' : '') + '</b>' + (r.tn > 1 ? ' seguidos, en dos tandas de grabación' : '') + '. Hoy hay ' + r.libres + ' turno' + (r.libres === 1 ? '' : 's') + ' libre' + (r.libres === 1 ? '' : 's') + '.</div>';
-    if (r.s) h += '<div class="alert g"><b>Entra.</b> Su turno de escritura sería <b>T' + r.s + '</b>' + (r.tn > 1 ? ' (y T' + (((r.s) % N_TURNOS) + 1) + ')' : '') + '. Su primer lote se produce dentro del onboarding y desde el segundo mes sigue su turno.</div><div class="card"><h4 style="margin-bottom:8px">Fechas fijas que se le comunicarían</h4>' + htmlFijas(S.hoy.slice(0, 7), [{ nombre: 'Cliente nuevo', w: r.s }]) + '</div>';
-    else h += '<div class="alert r"><b>No cabe con los turnos actuales.</b> Necesita ' + r.tn + ' turno' + (r.tn > 1 ? 's' : '') + (r.tn > 1 ? ' seguidos' : '') + ' y no hay ' + (r.tn > 1 ? 'dos libres juntos' : 'ninguno libre') + '. Según el Sistema de turnos, un cliente más necesita un segundo editor y un séptimo turno.</div>';
-    const nombres = Object.keys(r.horas);
-    h += '<div class="card"><h4 style="margin-bottom:8px">Trabajo que sumaría al equipo (dentro del turno de cada tanda)</h4>' + (nombres.length ? '<div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th>Horas</th><th>Frente a su semana</th></tr></thead><tbody>' + nombres.map(n => { const hh = Math.round(r.horas[n] * 10) / 10, cap = capOf(n); return '<tr><td>' + esc(n) + '</td><td>' + hh + ' h</td><td class="cg cg-' + nivel(r.horas[n], cap) + '">' + (cap ? Math.round(r.horas[n] / cap * 100) + '% de su semana (' + cap + ' h)' : '—') + '</td></tr>'; }).join('') + '</tbody></table></div><p class="sub" style="margin-top:6px">Incluye la investigación inicial. Las tareas de «Sin asignar» necesitan que alguien tenga ese rol.</p>' : '<div class="empty">Marca al menos un servicio de contenido</div>') + '</div>';
+    const r = sim.res, cu = r.cap[0];
+    if (cu) h += '<div class="alert ' + (sim.piezas > cu.margen ? 'r' : 'i') + '">Hoy, con lo que ya tienen contratado, el cuello de botella es <b>' + esc(cu.nombre) + '</b> (' + Math.round(cu.pct * 100) + '% ocupado): caben <b>≈ ' + cu.margen + ' piezas más al mes</b> sin pasar del ' + Math.round(umbral() * 100) + '%.' + (sim.piezas > cu.margen ? ' Un cliente de ' + sim.piezas + ' piezas <b>supera ese margen</b>: haría falta más horas de ' + esc(cu.nombre) + ' o alguien más.' : '') + '</div>';
+    if (r.found.length) {
+      h += '<div class="alert g"><b>Sí cabe.</b> Estas son las primeras fechas de entrega posibles (empezando desde hoy):</div>';
+      h += r.found.map((f, i) => { const pl = planSim(f.entrega), ev = f.ev; return '<div class="card"><div class="row" style="justify-content:space-between"><h4>' + (i === 0 ? 'La más cercana: ' : 'Opción ' + (i + 1) + ': ') + 'entrega el ' + corta(f.entrega) + '</h4><span class="badge ' + (ev.pico.ratio <= 1 ? 'b-listo' : 'b-warn') + '">Día más cargado: ' + esc(ev.pico.persona || '—') + ' al ' + Math.round(ev.pico.ratio * 100) + '%</span></div><div class="scroll"><table class="tbl tb"><thead><tr><th>Empieza</th><th>Escribe</th><th>Envía guiones</th><th>Cliente aprueba</th><th>Cliente graba</th><th>Edita</th><th>Entrega</th><th>Cliente revisa</th></tr></thead><tbody><tr><td>' + dm(ev.desde) + '</td><td>' + rango(pl.wr ? [pl.wr.ini, pl.wr.fin] : null) + '</td><td>' + (pl.envio ? dm(pl.envio) : '—') + '</td><td>' + rango(pl.aprueba) + '</td><td>' + rango(pl.grab) + '</td><td>' + rango(pl.ed ? [pl.ed.ini, pl.ed.fin] : null) + '</td><td><b>' + dm(pl.entrega) + '</b></td><td>' + rango(pl.revision) + '</td></tr></tbody></table></div></div>'; }).join('');
+      const horas = {}; r.found[0].ev.tasks.forEach(t => { if (t.responsable === 'Cliente') return; const k = t.responsable || 'Sin asignar'; horas[k] = (horas[k] || 0) + t.horas; });
+      h += '<div class="card"><h4 style="margin-bottom:8px">Trabajo que sumaría al equipo</h4><div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th>Horas del lote</th><th>Frente a su semana</th></tr></thead><tbody>' + Object.keys(horas).map(n => { const p = persona(n), hh = Math.round(horas[n] * 10) / 10, cs = p ? capSemNom(p) : 0; return '<tr><td>' + esc(n) + '</td><td>' + hh + ' h</td><td class="cg cg-' + nivel(hh, cs, 1.0) + '">' + (cs ? Math.round(hh / cs * 100) + '% de su semana (' + cs + ' h)' : '—') + '</td></tr>'; }).join('') + '</tbody></table></div><p class="sub" style="margin-top:6px">Las tareas «Sin asignar» necesitan que alguien tenga ese rol (Ajustes).</p></div>';
+    } else h += '<div class="alert r"><b>No hay una fecha en las próximas semanas que no sobrecargue a alguien.</b> Revisa el Tablero para ver quién está lleno, o suma horas de esa persona en Ajustes.</div>';
   }
   return h;
 }
 
 // ═════════ AJUSTES ═════════
-const opt = (arr, sel) => arr.map(k => '<option value="' + k[0] + '" ' + (sel === k[0] ? 'selected' : '') + '>' + k[1] + '</option>').join('');
-const SVC = [['', '—'], ['guion', 'Guionización'], ['grabacion', 'Grabación'], ['edicion', 'Edición'], ['trafico', 'Tráfico']], ALC = [['pieza', 'Por pieza'], ['lote', 'Una por lote'], ['cliente', 'Una por cliente']];
-const filaEtapa = e => '<tr data-key="' + esc(e.key) + '" data-orden="' + esc(e.orden) + '"><td><input data-f="nombre" value="' + esc(e.nombre) + '" style="width:190px"></td><td><input data-f="rol" value="' + esc(e.rol) + '" style="width:90px"></td><td><select data-f="alcance">' + opt(ALC, e.alcance || 'pieza') + '</select></td><td><input data-f="turnoRel" type="number" min="0" max="5" value="' + esc(e.turnoRel || '0') + '" style="width:56px"></td><td><input data-f="dia" type="number" min="1" max="5" value="' + esc(e.dia || '1') + '" style="width:56px"></td><td><input data-f="diaFin" type="number" min="1" max="5" value="' + esc(e.diaFin || e.dia || '1') + '" style="width:56px"></td><td><input data-f="horas" type="number" min="0" step="0.05" value="' + esc(e.horas || '0') + '" style="width:64px"></td><td><select data-f="requiere">' + opt(SVC, e.requiere) + '</select></td><td><select data-f="excluye">' + opt(SVC, e.excluye) + '</select></td><td><select data-f="calendario"><option ' + (e.calendario === 'SI' ? 'selected' : '') + '>SI</option><option ' + (e.calendario !== 'SI' ? 'selected' : '') + '>NO</option></select></td><td><input data-f="guia" value="' + esc(e.guia || '') + '" style="width:220px"></td><td><button class="btn sm d" data-act="et-del"><i class="ti ti-x"></i></button></td></tr>';
+const optH = (arr, sel) => arr.map(k => '<option value="' + k[0] + '" ' + (sel === k[0] ? 'selected' : '') + '>' + k[1] + '</option>').join('');
+const SVC = [['', '—'], ['guion', 'Guionización'], ['grabacion', 'Grabación'], ['edicion', 'Edición'], ['trafico', 'Tráfico']];
+const ALC = [['pieza', 'Por pieza'], ['lote', 'Una por lote'], ['cliente', 'Una por cliente']];
+const ANC = [['investigacion', 'Antes de escribir'], ['escritura', 'Bloque de escritura'], ['envio', 'Envío de guiones'], ['aprobacion', 'Aprobación de guiones'], ['material', 'Grabación / material'], ['edicion', 'Bloque de edición'], ['calidad', 'Bloque de calidad'], ['entrega', 'Entrega'], ['revision', 'Revisión del cliente']];
+const filaEtapa = e => '<tr data-key="' + esc(e.key) + '" data-orden="' + esc(e.orden) + '"><td><input data-f="nombre" value="' + esc(e.nombre) + '" style="width:190px"></td><td><input data-f="rol" value="' + esc(e.rol) + '" style="width:90px"></td><td><select data-f="alcance">' + optH(ALC, e.alcance || 'pieza') + '</select></td><td><select data-f="ancla">' + optH(ANC, e.ancla || 'entrega') + '</select></td><td><input data-f="offsetDias" type="number" value="' + esc(e.offsetDias || '0') + '" style="width:56px"></td><td><input data-f="horas" type="number" min="0" step="0.05" value="' + esc(e.horas || '0') + '" style="width:64px"></td><td><select data-f="requiere">' + optH(SVC, e.requiere) + '</select></td><td><select data-f="excluye">' + optH(SVC, e.excluye) + '</select></td><td><select data-f="calendario"><option ' + (e.calendario === 'SI' ? 'selected' : '') + '>SI</option><option ' + (e.calendario !== 'SI' ? 'selected' : '') + '>NO</option></select></td><td><input data-f="guia" value="' + esc(e.guia || '') + '" style="width:220px"></td><td><button class="btn sm d" data-act="et-del"><i class="ti ti-x"></i></button></td></tr>';
 function vAjustes() {
-  let h = '<div class="head"><h2>Ajustes</h2></div><div class="alert i">Lo que ves aquí sale de su Sistema de turnos y de sus manuales. Ajústalo cuando el proceso cambie: el plan, la carga y el dashboard se recalculan con esto.</div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Equipo y horas</h4><p class="sub" style="margin-bottom:8px">Roles separados por coma: guion, grabacion, edicion, calidad, trafico. Puedes agregar a quien necesites. Si cambias el nombre de alguien, sus tareas se actualizan solas.</p><div class="scroll"><table class="tbl" id="t-eq"><thead><tr><th>Nombre</th><th>Roles</th><th>Horas por semana</th><th>Activo</th><th></th></tr></thead><tbody>' +
-    S.equipo.map(p => '<tr data-id="' + esc(p.id) + '"><td><input data-f="nombre" value="' + esc(p.nombre) + '" style="width:130px"></td><td><input data-f="roles" value="' + esc(p.roles) + '" style="width:170px"></td><td><input data-f="horasSemana" type="number" min="0" value="' + esc(p.horasSemana) + '" style="width:80px"></td><td><select data-f="activo"><option ' + (p.activo !== 'NO' ? 'selected' : '') + '>SI</option><option ' + (p.activo === 'NO' ? 'selected' : '') + '>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>').join('') +
+  let h = '<div class="head"><h2>Ajustes</h2></div><div class="alert i">Aquí está lo que mueve todos los cálculos: las horas reales de cada persona y cuánto tarda cada etapa. Ajústalo cuando cambie el equipo; el tablero, los lotes y el simulador se recalculan.</div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Equipo y horas</h4><p class="sub" style="margin-bottom:8px">Horas de trabajo por día: de lunes a viernes y el sábado (hasta el mediodía). Roles separados por coma: guion, grabacion, edicion, calidad, trafico. Si cambias el nombre de alguien, sus tareas se actualizan solas.</p><div class="scroll"><table class="tbl" id="t-eq"><thead><tr><th>Nombre</th><th>Roles</th><th>Horas L–V</th><th>Horas sáb</th><th>Semana</th><th>Activo</th><th></th></tr></thead><tbody>' +
+    S.equipo.map(p => '<tr data-id="' + esc(p.id) + '"><td><input data-f="nombre" value="' + esc(p.nombre) + '" style="width:130px"></td><td><input data-f="roles" value="' + esc(p.roles) + '" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="' + esc(p.horasDia === '' || p.horasDia == null ? 8 : p.horasDia) + '" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="' + esc(p.horasSab === '' || p.horasSab == null ? 4 : p.horasSab) + '" style="width:70px"></td><td><span class="sub">' + capSemNom(p) + ' h</span></td><td><select data-f="activo"><option ' + (p.activo !== 'NO' ? 'selected' : '') + '>SI</option><option ' + (p.activo === 'NO' ? 'selected' : '') + '>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>').join('') +
     '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="eq-add"><i class="ti ti-plus"></i>Agregar persona</button><button class="btn sm p" data-act="eq-save"><i class="ti ti-device-floppy"></i>Guardar equipo</button></div></div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Piezas que cubre un turno</label><input id="cfg-porturno" type="number" min="1" value="' + porTurno() + '" style="width:110px"></div><div><label class="l">Rondas de cambios incluidas por pieza</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div></div><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Etapas de cada lote</h4><p class="sub" style="margin-bottom:8px"><b>Turno</b>: 0 = turno de escritura, 1 = grabación, 2 = edición, 3 = revisión del cliente. <b>Día / Hasta</b>: día dentro del turno (5 = último). <b>Por pieza</b>: una tarea por video, repartidas entre esos días. <b>Una por lote</b>: una tarea con la fecha de «Hasta». <b>Requiere / Excluye</b>: la etapa solo existe si el cliente incluye (o no incluye) ese servicio. <b>Calendario</b>: se publica en Google Calendar. <b>Guía</b>: pasos de «cómo se hace», separados por |.</p><div class="scroll"><table class="tbl" id="t-et"><thead><tr><th>Etapa</th><th>Rol</th><th>Alcance</th><th>Turno</th><th>Día</th><th>Hasta</th><th>Horas</th><th>Requiere</th><th>Excluye</th><th>Calendario</th><th>Guía</th><th></th></tr></thead><tbody>' + S.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0)).map(filaEtapa).join('') + '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="et-add"><i class="ti ti-plus"></i>Agregar etapa</button><button class="btn sm p" data-act="et-save"><i class="ti ti-device-floppy"></i>Guardar etapas</button></div><p class="sub" style="margin-top:8px">Cambiar etapas no modifica lotes ya creados; aplica a los que generes después.</p></div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Manuales</h4><p class="sub" style="margin-bottom:8px">Enlaces a sus documentos del Drive. El primero aparece como botón arriba.</p>' + [['cfg-u-manual', 'manualUrl', 'Manual de procesos y sistemas'], ['cfg-u-turnos', 'turnosUrl', 'Sistema de turnos de producción'], ['cfg-u-politica', 'politicaUrl', 'Política de revisiones y aprobaciones'], ['cfg-u-calidad', 'calidadUrl', 'Checklist de control de calidad']].map(u => '<label class="l">' + u[2] + '</label><input id="' + u[0] + '" value="' + esc(S.config[u[1]] || '') + '" style="width:100%">').join('') + '<div style="margin-top:10px"><button class="btn sm p" data-act="urls-save"><i class="ti ti-device-floppy"></i>Guardar enlaces</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Días para aprobar guiones y contenido</label><input id="cfg-aprob" type="number" min="1" value="' + diasAprob() + '" style="width:110px"></div><div><label class="l">Días de grabación</label><input id="cfg-grab" type="number" min="1" value="' + diasGrab() + '" style="width:110px"></div><div><label class="l">Rondas de cambios incluidas</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div><div><label class="l">Planificar hasta (% de las horas)</label><input id="cfg-umbral" type="number" min="50" max="100" value="' + Math.round(umbral() * 100) + '" style="width:110px"></div></div><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><label class="l">Feriados (MM-DD se repite cada año; AAAA-MM-DD es solo ese día)</label><input id="cfg-fer" value="' + esc(S.config.feriados || '') + '" style="width:100%"><p class="sub" style="margin-top:4px">Revisa esta lista: incluye los feriados nacionales de fecha fija; agrega los que cambian cada año (Semana Santa, feriados puente).</p><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Etapas de cada lote</h4><p class="sub" style="margin-bottom:8px">Las fechas se calculan <b>hacia atrás</b> desde la entrega fija del cliente. <b>Por pieza</b>: una tarea por video, repartidas según lo que rinde la persona cada día. <b>Una por lote</b>: una sola tarea. <b>Ancla</b>: de qué fecha cuelga. <b>± días</b>: días laborables antes (−) o después (+) de esa fecha. <b>Horas</b>: lo que toma cada tarea. <b>Requiere / Excluye</b>: la etapa solo existe si el cliente incluye (o no) ese servicio. <b>Calendario</b>: se publica en Google Calendar. <b>Guía</b>: pasos de «cómo se hace», separados por |.</p><div class="scroll"><table class="tbl" id="t-et"><thead><tr><th>Etapa</th><th>Rol</th><th>Alcance</th><th>Ancla</th><th>± días</th><th>Horas</th><th>Requiere</th><th>Excluye</th><th>Calendario</th><th>Guía</th><th></th></tr></thead><tbody>' + S.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0)).map(filaEtapa).join('') + '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="et-add"><i class="ti ti-plus"></i>Agregar etapa</button><button class="btn sm p" data-act="et-save"><i class="ti ti-device-floppy"></i>Guardar etapas</button></div><p class="sub" style="margin-top:8px">Cambiar etapas no modifica lotes ya creados; aplica a los que generes después.</p></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Manuales</h4><p class="sub" style="margin-bottom:8px">Enlaces a sus documentos del Drive. El primero aparece como botón arriba.</p>' + [['cfg-u-manual', 'manualUrl', 'Manual de procesos y sistemas'], ['cfg-u-turnos', 'turnosUrl', 'Sistema de turnos de producción (referencia anterior)'], ['cfg-u-politica', 'politicaUrl', 'Política de revisiones y aprobaciones'], ['cfg-u-calidad', 'calidadUrl', 'Checklist de control de calidad']].map(u => '<label class="l">' + u[2] + '</label><input id="' + u[0] + '" value="' + esc(S.config[u[1]] || '') + '" style="width:100%">').join('') + '<div style="margin-top:10px"><button class="btn sm p" data-act="urls-save"><i class="ti ti-device-floppy"></i>Guardar enlaces</button></div></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Google Calendar</h4><p class="sub" style="margin-bottom:8px">Publica en el calendario de Sinergia las etapas con Calendario = SI (por defecto: envío de guiones, grabación o material, entrega y campañas) como eventos de todo el día con el prefijo «Prod ·». Si cambian fechas o responsables, vuelve a sincronizar.</p><button class="btn sm p" data-act="cal-sync"><i class="ti ti-calendar-event"></i>Sincronizar con Google Calendar</button></div>';
-  const legacy = S.tareas.filter(t => !LOTE_RE.test(t.ciclo)).length;
-  if (legacy) h += '<div class="card"><h4 style="margin-bottom:4px">Tareas del modelo anterior</h4><p class="sub" style="margin-bottom:8px">Hay ' + legacy + ' tareas creadas con la versión anterior de la app (por ciclo de pago y no por turnos). Ya no se usan en el dashboard.</p><button class="btn sm d" data-act="legacy"><i class="ti ti-trash"></i>Borrar tareas del modelo anterior</button></div>';
+  const legacy = S.tareas.filter(t => t.plan !== 'v4').length;
+  if (legacy) h += '<div class="card"><h4 style="margin-bottom:4px">Tareas de versiones anteriores</h4><p class="sub" style="margin-bottom:8px">Hay ' + legacy + ' tareas creadas con una versión anterior de la app (por turnos fijos o por ciclo de pago). Sus fechas ya no coinciden con el sistema nuevo. Bórralas y vuelve a generar los lotes en Clientes.</p><button class="btn sm d" data-act="legacy"><i class="ti ti-trash"></i>Borrar tareas de versiones anteriores</button></div>';
   return h;
 }
 const slug = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '') || ('p' + Date.now());
@@ -774,16 +934,23 @@ async function guardar(accion, d, ok) {
   try { const r = await api(accion, { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); if (ok) alert(ok); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
 }
-const guardarEquipo = () => guardar('saveEquipo', leerTabla('t-eq').filter(o => (o.nombre || '').trim()).map(o => ({ id: o.id || slug(o.nombre), nombre: o.nombre.trim(), roles: (o.roles || '').trim(), capacidad: '', activo: o.activo || 'SI', horasSemana: o.horasSemana || '' })));
-function guardarEtapas() {
-  const filas = leer_et(); let mx = Math.max(0, ...filas.map(o => parseInt(o.orden) || 0)); const usadas = {};
-  return guardar('saveEtapas', filas.map(o => { let key = o.key || slug(o.nombre); while (usadas[key]) key += 'x'; usadas[key] = true; return { key, nombre: o.nombre.trim(), rol: (o.rol || '').trim(), diasAntes: '', requiere: o.requiere || '', orden: o.orden || String(++mx), excluye: o.excluye || '', calendario: o.calendario || 'NO', alcance: o.alcance || 'pieza', turnoRel: o.turnoRel || '0', dia: o.dia || '1', diaFin: o.diaFin || o.dia || '1', horas: o.horas || '0', guia: (o.guia || '').trim() }; }));
+const guardarEquipo = () => guardar('saveEquipo', leerTabla('t-eq').filter(o => (o.nombre || '').trim()).map(o => { const d = num(o.horasDia, 8), s = num(o.horasSab, 4); return { id: o.id || slug(o.nombre), nombre: o.nombre.trim(), roles: (o.roles || '').trim(), capacidad: '', activo: o.activo || 'SI', horasSemana: String(5 * d + s), horasDia: String(d), horasSab: String(s) }; }));
+// Una etapa por vez (las guías largas no caben todas juntas en una dirección web); al final se quitan las que ya no están
+async function guardarEtapas() {
+  const filas = leerTabla('t-et').filter(o => (o.nombre || '').trim()); let mx = Math.max(0, ...filas.map(o => parseInt(o.orden) || 0)); const usadas = {};
+  const lista = filas.map(o => { let key = o.key || slug(o.nombre); while (usadas[key]) key += 'x'; usadas[key] = true; return { key, nombre: o.nombre.trim(), rol: (o.rol || '').trim(), diasAntes: '', requiere: o.requiere || '', orden: o.orden || String(++mx), excluye: o.excluye || '', calendario: o.calendario || 'NO', alcance: o.alcance || 'pieza', turnoRel: '', dia: '', diaFin: '', horas: o.horas || '0', guia: (o.guia || '').trim(), ancla: o.ancla || 'entrega', offsetDias: o.offsetDias || '0' }; });
+  loading(true, 'Guardando etapas…');
+  try {
+    for (const e of lista) { const r = await api('saveEtapa', { d: e }); if (!r.ok) throw new Error(r.error); }
+    const r2 = await api('borrarEtapas', { d: { keep: lista.map(e => e.key) } }); if (!r2.ok) throw new Error(r2.error);
+    await cargar(); render();
+  } catch (e) { alert('Error al guardar las etapas: ' + e.message + '\nLo que ya se guardó se conserva; vuelve a intentarlo.'); try { await cargar(); render(); } catch (e2) {} }
+  loading(false);
 }
-const leer_et = () => leerTabla('t-et').filter(o => (o.nombre || '').trim());
-const guardarReglas = () => guardar('saveConfig', { pares: { piezasPorTurno: String(parseInt($('cfg-porturno').value) || 25), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|') } });
+const guardarReglas = () => guardar('saveConfig', { pares: { diasAprob: String(Math.max(1, parseInt($('cfg-aprob').value) || 2)), diasGrab: String(Math.max(1, parseInt($('cfg-grab').value) || 2)), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), umbralCarga: String(Math.min(100, Math.max(50, parseInt($('cfg-umbral').value) || 85))), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|'), feriados: $('cfg-fer').value.split(',').map(s => s.trim()).filter(Boolean).join(',') } });
 const guardarUrls = () => guardar('saveConfig', { pares: { manualUrl: $('cfg-u-manual').value.trim(), turnosUrl: $('cfg-u-turnos').value.trim(), politicaUrl: $('cfg-u-politica').value.trim(), calidadUrl: $('cfg-u-calidad').value.trim() } });
 async function limpiarLegacy() {
-  if (!confirm('¿Borrar las tareas del modelo anterior? Esta acción no se puede deshacer.')) return;
+  if (!confirm('¿Borrar las tareas de versiones anteriores? Esta acción no se puede deshacer.')) return;
   loading(true, 'Limpiando…');
   try { const r = await api('limpiarLegacy'); if (!r.ok) throw new Error(r.error); await cargar(); render(); alert('Listo: ' + r.borradas + ' tareas borradas.'); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
@@ -906,19 +1073,19 @@ document.addEventListener('click', e => {
   else if (a.indexOf('pz-') === 0) accionPieza(a, d.cid, d.ciclo, d.pz);
   else if (a === 'gen') abrirGen(id, d.ciclo);
   else if (a === 'gen-ok') confirmarGen();
+  else if (a === 'gen-mes') genMes(d.m);
   else if (a === 'borrarlote') borrarLote(id, d.ciclo);
   else if (a === 'retraso') abrirRetraso(id, d.ciclo);
   else if (a === 'retraso-ok') confirmarRetraso();
-  else if (a === 'turno') abrirTurno(id);
-  else if (a === 'turno-ok') guardarTurno();
-  else if (a === 'turnos-save') guardarTurnos();
+  else if (a === 'fechas') abrirFechas(id);
+  else if (a === 'fechas-ok') guardarFechas();
   else if (a === 'extra') abrirExtra(id);
   else if (a === 'extra-ok') { const c = ctxCli, ds = $('x-desc').value, tp = $('x-tipo').value; loading(true, 'Guardando…'); guardarExtra(ds, tp, c).then(async ok => { if (ok) { closeModal(); await cargar(); render(); } }).catch(err => alert('Error: ' + err.message)).finally(() => loading(false)); }
   else if (a === 'sim') calcSim();
-  else if (a === 'eq-add') document.querySelector('#t-eq tbody').insertAdjacentHTML('beforeend', '<tr><td><input data-f="nombre" style="width:130px"></td><td><input data-f="roles" style="width:170px"></td><td><input data-f="horasSemana" type="number" min="0" style="width:80px"></td><td><select data-f="activo"><option>SI</option><option>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>');
+  else if (a === 'eq-add') document.querySelector('#t-eq tbody').insertAdjacentHTML('beforeend', '<tr><td><input data-f="nombre" style="width:130px"></td><td><input data-f="roles" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="8" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="4" style="width:70px"></td><td></td><td><select data-f="activo"><option>SI</option><option>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>');
   else if (a === 'eq-del' || a === 'et-del') el.closest('tr').remove();
   else if (a === 'eq-save') guardarEquipo();
-  else if (a === 'et-add') document.querySelector('#t-et tbody').insertAdjacentHTML('beforeend', filaEtapa({ key: '', nombre: '', rol: '', alcance: 'lote', turnoRel: '0', dia: '1', diaFin: '1', horas: '0', requiere: '', excluye: '', calendario: 'NO', guia: '', orden: '' }));
+  else if (a === 'et-add') document.querySelector('#t-et tbody').insertAdjacentHTML('beforeend', filaEtapa({ key: '', nombre: '', rol: '', alcance: 'lote', ancla: 'entrega', offsetDias: '0', horas: '0', requiere: '', excluye: '', calendario: 'NO', guia: '', orden: '' }));
   else if (a === 'et-save') guardarEtapas();
   else if (a === 'cfg-save') guardarReglas();
   else if (a === 'urls-save') guardarUrls();
