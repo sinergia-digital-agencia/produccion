@@ -168,13 +168,29 @@ function finMes(ym) { const p = ym.split('-').map(Number); return new Date(p[0],
 
 // ── Calendario laboral: lunes a sábado (sábado hasta el mediodía). Sin domingos ni feriados ──
 // Jueves y Viernes Santo de un año (Pascua por el algoritmo gregoriano): cambian cada año, así que se calculan solos
-function semanaSanta(y) {
+function pascuaDe(y) {
   const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
   const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
   const mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1, pascua = y + '-' + pad(mes) + '-' + pad(dia);
-  return [addDays(pascua, -3), addDays(pascua, -2)];
+  return pascua;
 }
-const parseFeriados = txt => { const l = String(txt || '').split(',').map(s => s.trim()).filter(Boolean); for (let y = 2024; y <= 2036; y++) semanaSanta(y).forEach(f => l.push(f)); return l; };
+const semanaSanta = y => { const p = pascuaDe(y); return [addDays(p, -3), addDays(p, -2)]; };
+// Festivos de Colombia (Ley 51 de 1983 «Emiliani»: la mayoría se pasa al lunes siguiente; Semana Santa y las fechas de Pascua se calculan)
+function feriadosColombia(y) {
+  const p = pascuaDe(y), lun = f => { const d = parse(f).getDay(); return addDays(f, (8 - d) % 7); };   // si ya es lunes, se queda
+  const L = [y + '-01-01', y + '-05-01', y + '-07-20', y + '-08-07', y + '-12-08', y + '-12-25'];
+  ['01-06', '03-19', '06-29', '08-15', '10-12', '11-01', '11-11'].forEach(x => L.push(lun(y + '-' + x)));
+  if (y >= 2026) L.push(lun(y + '-07-09'));   // Ley 2578 de 2026: Nuestra Señora del Rosario de Chiquinquirá
+  [-3, -2, 43, 64, 71].forEach(n => L.push(addDays(p, n)));   // Jueves y Viernes Santo; Ascensión, Corpus Christi y Sagrado Corazón (al lunes)
+  return L.sort();
+}
+// Feriados de Perú (la lista) y, en la propiedad .co, los de Colombia (para quien trabaja con ese calendario)
+const parseFeriados = (txt, txtCO) => {
+  const l = String(txt || '').split(',').map(s => s.trim()).filter(Boolean), co = String(txtCO || '').split(',').map(s => s.trim()).filter(Boolean);
+  for (let y = 2024; y <= 2036; y++) { semanaSanta(y).forEach(f => l.push(f)); feriadosColombia(y).forEach(f => co.push(f)); }
+  l.co = co; return l;
+};
+const feriadosDe = (p, fer) => (p && p.pais === 'CO' && fer && fer.co) ? fer.co : fer;
 const esFeriado = (f, fer) => fer.indexOf(f) >= 0 || fer.indexOf(f.slice(5)) >= 0;
 const esLab = (f, fer) => parse(f).getDay() !== 0 && !esFeriado(f, fer);
 function prevLab(f, fer) { let g = f; for (let i = 0; i < 14 && !esLab(g, fer); i++) g = addDays(g, -1); return g; }
@@ -183,7 +199,7 @@ function addLab(f, n, fer) { let g = f, k = Math.abs(n); const s = n < 0 ? -1 : 
 // Ausencias de una persona: "2026-12-20/2027-01-03, 2026-11-10" (rango o día suelto, separados por coma)
 const enAusencia = (p, f) => String((p || {}).ausencias || '').split(',').some(r => { const t = r.trim().split('/'), a = t[0], b = t[1] || t[0]; return !!a && f >= a && f <= b; });
 // Horas que una persona tiene ese día (L–V una cifra, sábado otra; 0 en domingos, feriados y ausencias)
-const horasDelDia = (p, f, fer) => (!esLab(f, fer) || enAusencia(p, f) ? 0 : (parse(f).getDay() === 6 ? num((p || {}).horasSab, 4) : num((p || {}).horasDia, 8)));
+const horasDelDia = (p, f, fer) => (!esLab(f, feriadosDe(p, fer)) || enAusencia(p, f) ? 0 : (parse(f).getDay() === 6 ? num((p || {}).horasSab, 4) : num((p || {}).horasDia, 8)));
 const capSemana = (p, lun, fer) => { let s = 0; for (let i = 0; i < 7; i++) s += horasDelDia(p, addDays(lun, i), fer); return s; };
 // Lo que le queda libre a una persona ese día, descontando lo que ya tiene comprometido (ocup[nombre][fecha])
 const capDisp = (p, f, fer, ocup) => Math.max(0, horasDelDia(p, f, fer) - ((((ocup || {})[(p || {}).nombre]) || {})[f] || 0));
@@ -258,13 +274,18 @@ function planFechas(o) {
     r.wr = bloque(o.hEscritura, o.pEscritura, r.envio, fer, o.ocup); r.inv = addLab(r.wr.ini, -1, fer);
     if (o.hEscritura2 > 0) r.wr2 = bloque(o.hEscritura2, o.pEscritura2, r.envio, fer, o.ocup);
   }
+  if (o.inv) {   // sesión de onboarding: fecha fija si ya la tienen; si no, antes de que arranque la investigación
+    const base = (r.wr && r.wr.ini) || r.material || r.entrega;
+    r.onb = o.fechaOnb ? nextLab(o.fechaOnb, fer) : addLab(base, -Math.max(1, o.invDias || 0), fer);
+    if (o.fechaOnb && o.invDias && addLab(r.onb, o.invDias, fer) > base) (r.avisos = r.avisos || []).push('inicio');   // el contenido tendría que empezar antes de que termine la investigación
+  }
   return r;
 }
 const sortEt = (a, b) => (+a.orden || 0) - (+b.orden || 0);
 const cumpleEt = (e, incluye) => !(e.requiere && !incluye.includes(e.requiere)) && !(e.excluye && incluye.includes(e.excluye));
 const esPieza = e => (e.alcance || 'pieza') === 'pieza';
 function fechaAncla(plan, a) {
-  return ({ investigacion: plan.inv, envio: plan.envio, aprobacion: plan.aprueba && plan.aprueba[1], material: plan.material, entrega: plan.entrega, revision: plan.revision && plan.revision[1],
+  return ({ onboarding: plan.onb, investigacion: plan.inv, envio: plan.envio, aprobacion: plan.aprueba && plan.aprueba[1], material: plan.material, entrega: plan.entrega, revision: plan.revision && plan.revision[1],
     escritura: plan.wr && plan.wr.fin, edicion: plan.ed && plan.ed.fin, calidad: plan.qa && plan.qa.fin })[a];
 }
 // Construye el plan de un lote (fechas clave + etapas activas)
@@ -279,7 +300,7 @@ function construirPlan(o) {
   const hpp = a => etapas.filter(e => esPieza(e) && e.ancla === a).reduce((s, e) => s + num(e.horas, 0), 0);
   const bh = a => hpp(a) * (a === 'escritura' ? n - co : n);
   const plan = (n < 1 || !o.entrega) ? null : planFechas({ entrega: o.entrega, fer, diasAprob: num(o.diasAprob, 2), diasGrab: num(o.diasGrab, 2), guion: etapas.some(e => esPieza(e) && e.ancla === 'escritura'), edicion: etapas.some(e => esPieza(e) && e.ancla === 'edicion'),
-    hEscritura: bh('escritura'), hEdicion: bh('edicion'), hCalidad: bh('calidad'), pEscritura: bp('escritura'), pEdicion: bp('edicion'), pCalidad: bp('calidad'), inv: o.investigacion, ocup: o.ocup, fijas: o.fijas, hEscritura2: co * hpp('escritura'), pEscritura2: p2 });
+    hEscritura: bh('escritura'), hEdicion: bh('edicion'), hCalidad: bh('calidad'), pEscritura: bp('escritura'), pEdicion: bp('edicion'), pCalidad: bp('calidad'), inv: o.investigacion, ocup: o.ocup, fijas: o.fijas, fechaOnb: o.fechaOnb, invDias: o.invDias, hEscritura2: co * hpp('escritura'), pEscritura2: p2 });
   return { n, off, etapas, plan, fer, co, p2 };
 }
 // o: {entrega, tanda, tandas, piezas, incluye[], etapas[], equipo[], fer[], diasAprob, diasGrab, investigacion}
@@ -306,8 +327,8 @@ function generarLote(o) {
       } else { const f = fechaAncla(plan, anc); for (let i = 1; i <= n; i++) mk(off + i, f && desp ? addLab(f, desp, fer) : f); }
     } else {
       let f = fechaAncla(plan, anc); if (f && desp) f = addLab(f, desp, fer);
-      if (f && alc === 'cliente' && horas > 0) { const pe = personaDe(e.rol, o.equipo, o.asig); for (let i = 0; i < 10 && capDisp(pe, f, fer, o.ocup) + 1e-9 < horas; i++) f = prevLab(addDays(f, -1), fer); }
-      const ps = (alc !== 'cliente' && e.rol !== 'cliente') ? personasDe(e.rol, o.equipo, o.asig) : [];
+      if (f && alc === 'cliente' && horas > 0 && !(e.key === 'onboarding' && o.fechaOnb)) { const pp = personasDe(e.rol, o.equipo, o.asig); for (let i = 0; i < 10 && pp.some(p => capDisp(p, f, fer, o.ocup) + 1e-9 < horas); i++) f = prevLab(addDays(f, -1), fer); }   // si van varias personas, el día debe tener hueco para TODAS (en paralelo)
+      const ps = e.rol !== 'cliente' ? personasDe(e.rol, o.equipo, o.asig) : [];
       if (f && ps.length > 1) ps.forEach(p => mk(0, f, p.nombre, p.id)); else mk(0, f);   // una tarea para cada persona que va (ej.: grabar a Elle)
     }
   });
@@ -371,19 +392,21 @@ function capacidadMes(ym, clientes, etapas, equipo, fer, umbral, vent) {
 // ¿Cabe un cliente nuevo con esa fecha de entrega? Se suma su plan a lo que ya hay y se mira el día más cargado.
 function evaluarEntrega(o) {
   const ocup = cargaDiaria(o.tareas, o.equipo, '0000-00-00', '9999-99-99', true);
-  const tasks = generarLote({ entrega: o.entrega, tanda: 1, tandas: 1, piezas: o.piezas, incluye: o.incluye, etapas: o.etapas, equipo: o.equipo, fer: o.fer, diasAprob: o.diasAprob, diasGrab: o.diasGrab, investigacion: !!o.investigacion, ocup });
+  const tasks = generarLote({ entrega: o.entrega, tanda: 1, tandas: 1, piezas: o.piezas, incluye: o.incluye, etapas: o.etapas, equipo: o.equipo, fer: o.fer, diasAprob: o.diasAprob, diasGrab: o.diasGrab, investigacion: !!o.investigacion, asig: o.asig, fechaOnb: o.fechaOnb, invDias: o.invDias, ocup });
   if (!tasks.length) return null;
   const fs_ = tasks.map(t => t.fecha).sort(), desde = fs_[0], hasta = fs_[fs_.length - 1];
   const base = ocup, add = cargaDiaria(tasks, o.equipo, desde, hasta, false);
   let pico = { ratio: 0 };
   Object.keys(add).forEach(n => { const p = o.equipo.find(x => x.nombre === n); Object.keys(add[n]).forEach(f => { const cap = horasDelDia(p, f, o.fer), tot = ((base[n] || {})[f] || 0) + add[n][f], r = cap ? tot / cap : 99; if (r > pico.ratio) pico = { persona: n, fecha: f, horas: Math.round(tot * 100) / 100, cap, ratio: r }; }); });
   // Si para cumplir la fecha habría que haber empezado antes de hoy, no cabe
-  const antes = !!o.hoy && desde < o.hoy;
-  return { tasks, desde, hasta, pico, antes, ok: pico.ratio <= TOL && !antes, justo: pico.ratio <= 1 + 1e-9 };
+  const arranque = tasks.filter(t => t.etapa !== 'investigacion' && t.etapa !== 'onboarding').map(t => t.fecha).sort()[0];
+  // además: nada puede empezar antes de que termine la investigación y el onboarding del cliente (o.inicioMin)
+  const antes = (!!o.hoy && desde < o.hoy) || (!!o.inicioMin && !!arranque && arranque < o.inicioMin);
+  return { tasks, desde, hasta, arranque, pico, antes, ok: pico.ratio <= TOL && !antes, justo: pico.ratio <= 1 + 1e-9 };
 }
 function buscarEntregas(o) {
   const res = []; let f = nextLab(o.desde, o.fer);
-  for (let i = 0; i < 60 && res.length < 3; i++, f = nextLab(addDays(f, 1), o.fer)) {
+  for (let i = 0; i < 120 && res.length < 3; i++, f = nextLab(addDays(f, 1), o.fer)) {
     const ev = evaluarEntrega(Object.assign({}, o, { entrega: f })); if (!ev) continue;
     if (ev.ok) res.push({ entrega: f, ev });
   }
@@ -488,7 +511,7 @@ function planificarCiclo(items, tope, reserva, fer, ocupBase) {
     const tareas = generarLote(Object.assign({}, it.mk(E), { ocup }));
     tareas.forEach(t => { const h = num(t.horas, 0); if (h && t.responsable && t.responsable !== 'Cliente') { const o = (ocup[t.responsable] = ocup[t.responsable] || {}); o[t.fecha] = (o[t.fecha] || 0) + h; } });
     if (it.edH && plan && plan.plan && plan.plan.ed) limite = plan.plan.ed.ini;
-    out[k] = { item: it, orden: k + 1, entrega: E, plan: plan ? plan.plan : null, tareas, desde: tareas.map(t => t.fecha).sort()[0] || null };
+    out[k] = { item: it, orden: k + 1, entrega: E, plan: plan ? plan.plan : null, tareas, desde: tareas.filter(t => t.etapa !== 'onboarding').map(t => t.fecha).sort()[0] || null };
   }
   return out;
 }
@@ -504,7 +527,6 @@ function proyectarCola(lotes, hoy, fer, ocup) {
   const orden = lotes.map((l, i) => i).sort((a, b) => lotes[a].orden - lotes[b].orden);
   const pend = lotes.map(l => l.ed.slice());
   for (let f = hoy, g = 0; pend.some(x => x.length) && g < 240; f = addDays(f, 1), g++) {
-    if (!esLab(f, fer)) continue;
     orden.forEach(i => { if (lotes[i].disp > f) return; pend[i] = pend[i].filter(t => { if (left(t.p, f) + 1e-9 >= t.h) { take(t.p, f, t.h); res[i].edit[t.id] = f; return false; } return true; }); });
   }
   pend.forEach((x, i) => { res[i].sinCabida = x.length; });
@@ -512,7 +534,7 @@ function proyectarCola(lotes, hoy, fer, ocup) {
   const qa = [];
   lotes.forEach((l, i) => { const fe = {}; l.ed.forEach(t => { fe[t.pieza] = res[i].edit[t.id]; }); l.qa.forEach(t => qa.push({ i, t, a: fe[t.pieza] ? addLab(fe[t.pieza], 1, fer) : hoy })); });
   qa.sort((x, y) => (x.a < y.a ? -1 : x.a > y.a ? 1 : lotes[x.i].orden - lotes[y.i].orden));
-  qa.forEach(x => { let f = x.a < hoy ? hoy : x.a; for (let g = 0; g < 240; g++, f = addDays(f, 1)) { if (esLab(f, fer) && left(x.t.p, f) + 1e-9 >= x.t.h) { take(x.t.p, f, x.t.h); res[x.i].qa[x.t.id] = f; break; } } });
+  qa.forEach(x => { let f = x.a < hoy ? hoy : x.a; for (let g = 0; g < 240; g++, f = addDays(f, 1)) { if (left(x.t.p, f) + 1e-9 >= x.t.h) { take(x.t.p, f, x.t.h); res[x.i].qa[x.t.id] = f; break; } } });
   res.forEach(r => { const e = Object.values(r.edit).sort(), q = Object.values(r.qa).sort(); r.finEd = e.length ? e[e.length - 1] : null; r.fin = q.length ? q[q.length - 1] : r.finEd; });
   return res;
 }
@@ -528,7 +550,7 @@ const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const FASE_CLASE = { 'En guionización': 'curso', 'Guion en revisión del cliente': 'rev', 'Esperando grabación o material': 'pend', 'En edición': 'curso', 'En control de calidad': 'rev', 'Requiere actualización': 'cambios', 'Listo para entregar': 'azul', 'En revisión del cliente': 'rev', 'Reenviado a revisión': 'rev', 'Aprobado por el cliente': 'listo', 'Completada': 'listo' };
 let S = { equipo: [], etapas: [], tareas: [], clientes: [], cronograma: [], extras: [], config: {}, hoy: '' };
 let CODE = '', YO = '', view = 'dashboard', mes = '', semOff = 0, fP = '', fC = '', pFase = '', pCli = '', genCtx = null, ctxCli = null;
-let sim = { piezas: 20, incl: ['guion', 'edicion'], inv: true, res: null };
+let sim = { piezas: 20, incl: ['guion', 'edicion'], inv: true, entra: '', invd: 10, res: null };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -540,11 +562,27 @@ const lsGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { r
 const lsSet = (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} };
 const setSync = (st, txt) => { $('dot').className = 'dot' + (st === 'err' ? ' err' : st === 'sync' ? ' sync' : ''); $('estado-sync').textContent = txt; };
 const loading = (on, t) => { $('loading').hidden = !on; if (t) $('loading-txt').textContent = t; };
-const FER = () => parseFeriados(S.config.feriados);
+const FER = () => parseFeriados(S.config.feriados, S.config.feriadosCO);
 const diasAprob = () => num(S.config.diasAprob, 2);
 const diasGrab = () => num(S.config.diasGrab, 2);
 const umbral = () => num(S.config.umbralCarga, 85) / 100;
 const rondasMax = () => { const v = parseInt(S.config.rondasMax); return isNaN(v) ? 1 : v; };
+const diasInv = () => { const v = parseInt(S.config.diasInvestigacion); return isNaN(v) ? 10 : Math.max(0, v); };
+const onboardingPor = () => S.config.onboardingPor || '';
+const onboardingTrafico = () => S.config.onboardingTrafico || '';
+// Quién hace el onboarding: con tráfico (activos de pauta) y sin tráfico pueden ser personas distintas
+const onboardingSim = incl => (incl.indexOf('trafico') >= 0 ? onboardingTrafico() : onboardingPor());
+const onboardingDe = c => onboardingSim(incluyeDe(c));
+// ¿Las personas del onboarding tienen hueco ese día (todas a la vez)? Si no, el primer día en que sí
+function huecoOnboarding(c, f) {
+  const fer = FER(), cr = cronoDe(c.id), ocup = cargaDiaria(S.tareas.filter(t => !(t.clienteId === c.id && t.etapa === 'onboarding')), S.equipo, '0000-00-00', '9999-99-99', true);
+  const ps = personasDe('onboarding', S.equipo, Object.assign({ onboarding: onboardingDe(c) }, cr.asig)), e = S.etapas.find(x => x.key === 'onboarding'), h = e ? num(e.horas, 2) : 0, f0 = nextLab(f, fer);
+  let g = f0, quien = '';
+  if (h > 0 && ps.length) for (let i = 0; i < 40; i++) { const q = ps.find(p => capDisp(p, g, fer, ocup) + 1e-9 < h); if (!q) break; if (!quien) quien = q.nombre; g = nextLab(addDays(g, 1), fer); }
+  return { ok: g === f0, quien, siguiente: g, personas: ps };
+}
+const clienteTipico = () => { const v = parseInt(S.config.clienteTipico); return v > 0 ? v : 20; };
+const rondasCopy = () => { const v = parseInt(S.config.rondasCopy); return isNaN(v) ? 1 : v; };
 const persona = n => S.equipo.find(x => x.nombre === n) || null;
 const capSemNom = p => 5 * num(p && p.horasDia, 8) + num(p && p.horasSab, 4);
 const capSem = (n, lun) => capSemana(persona(n), lun, FER());
@@ -561,7 +599,7 @@ const cronoDe = id => {
   const r = S.cronograma.find(x => x.clienteId === id) || {};
   const entregas = String(r.entregas || '').split(',').map(s => parseInt(s)).filter(n => n >= 1 && n <= 31);
   const dA = parseInt(r.diasAprob), dG = parseInt(r.diasGrab);
-  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: parseInt(r.coautorPiezas) || 0, diasAprob: dA >= 1 ? dA : null, diasGrab: dG >= 1 ? dG : null, primera: r.primeraEntrega || '', ultima: r.ultimaEntrega || '', asig: asigMap(r.asignaciones), dGuiones: parseInt(r.diaGuiones) >= 1 ? parseInt(r.diaGuiones) : null, dMaterial: parseInt(r.diaMaterial) >= 1 ? parseInt(r.diaMaterial) : null, graba: r.graba === 'cliente' || r.graba === 'sinergia' ? r.graba : '', prio: parseInt(r.prioridad) > 0 ? parseInt(r.prioridad) : null };
+  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: parseInt(r.coautorPiezas) || 0, diasAprob: dA >= 1 ? dA : null, diasGrab: dG >= 1 ? dG : null, primera: r.primeraEntrega || '', ultima: r.ultimaEntrega || '', asig: asigMap(r.asignaciones), onboarding: r.fechaOnboarding || '', dGuiones: parseInt(r.diaGuiones) >= 1 ? parseInt(r.diaGuiones) : null, dMaterial: parseInt(r.diaMaterial) >= 1 ? parseInt(r.diaMaterial) : null, graba: r.graba === 'cliente' || r.graba === 'sinergia' ? r.graba : '', prio: parseInt(r.prioridad) > 0 ? parseInt(r.prioridad) : null };
 };
 // Servicios que de verdad hacemos: la grabación sale de «Quién graba» de la ficha del cliente (si está vacío, lo que diga el CRM)
 const incluyeDe = c => { const cr = cronoDe(c.id), base = c.incluye || [], sin = base.filter(k => k !== 'grabacion'); return (cr.graba === 'sinergia' || (cr.graba !== 'cliente' && base.indexOf('grabacion') >= 0)) ? sin.concat(['grabacion']) : sin; };
@@ -596,7 +634,7 @@ function fijasDe(c, ym, prom) {
 }
 function paramsPromesa(c, ym, j, prom, inv) {
   const cr = cronoDe(c.id), fer = FER();
-  return { fijas: fijasDe(c, ym, prom), entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: cr.asig, cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
+  return { fijas: fijasDe(c, ym, prom), entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: Object.assign({ onboarding: onboardingDe(c) }, cr.asig), fechaOnb: (!!inv && j === 1 && cr.onboarding) ? cr.onboarding : null, invDias: diasInv(), cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
 }
 function paramsLote(c, loteId, inv) { const ym = loteId.slice(0, 7), j = +loteId.split('-')[2]; return paramsPromesa(c, ym, j, promesa(c, ym, j), inv); }
 // Lo que ya tienen comprometido (tareas pendientes de los demás lotes): el lote nuevo se acomoda en los huecos
@@ -652,12 +690,12 @@ function mensajeConFechas(c, f, ym) {
   if (f.tieneEdicion && !f.conGrab && f.material) L.push((n++) + ') Nos entregas el material grabado a más tardar el ' + corta(f.material) + '.');
   if (f.tieneEdicion && f.conGrab && f.grab) L.push((n++) + ') Grabamos ' + (f.grab[0] === f.grab[1] ? 'el ' + corta(f.grab[0]) : 'entre el ' + corta(f.grab[0]) + ' y el ' + corta(f.grab[1])) + '.');
   if (f.tieneEdicion && f.editado) L.push((n++) + ') Te entregamos tu contenido editado el ' + corta(f.editado) + '.');
-  L.push('Tienes ' + (cr.diasAprob || diasAprob()) * 24 + ' horas para aprobar cada entrega y ' + rondasMax() + ' cambio' + (rondasMax() === 1 ? '' : 's') + ' por video.' + (f.tieneEdicion && !f.conGrab && f.material ? ' Si el material llega después del ' + corta(f.material) + ', la entrega se mueve los mismos días.' : ''));
+  L.push('Tienes ' + (cr.diasAprob || diasAprob()) * 24 + ' horas para aprobar cada entrega, ' + (f.tieneGuion ? rondasCopy() + ' ajuste' + (rondasCopy() === 1 ? '' : 's') + ' de copy por guion y ' : '') + rondasMax() + ' cambio' + (rondasMax() === 1 ? '' : 's') + ' por video.' + (f.tieneEdicion && !f.conGrab && f.material ? ' Si el material llega después del ' + corta(f.material) + ', la entrega se mueve los mismos días.' : ''));
   return L.join('\n');
 }
 const mensajeCliente = (c, loteId) => mensajeConFechas(c, fechas3(c, loteId), loteId.slice(0, 7));
 // Fila completa del cronograma de un cliente (para guardar sin perder lo que ya tenía)
-const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { clienteId: id, entregas: r.entregas || '', aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: r.coautorPiezas || '', diasAprob: r.diasAprob || '', diasGrab: r.diasGrab || '', primeraEntrega: r.primeraEntrega || '', ultimaEntrega: r.ultimaEntrega || '', asignaciones: r.asignaciones || '', graba: r.graba || '', prioridad: r.prioridad || '', diaGuiones: r.diaGuiones || '', diaMaterial: r.diaMaterial || '' }; };
+const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { clienteId: id, entregas: r.entregas || '', aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: r.coautorPiezas || '', diasAprob: r.diasAprob || '', diasGrab: r.diasGrab || '', primeraEntrega: r.primeraEntrega || '', ultimaEntrega: r.ultimaEntrega || '', asignaciones: r.asignaciones || '', graba: r.graba || '', prioridad: r.prioridad || '', diaGuiones: r.diaGuiones || '', diaMaterial: r.diaMaterial || '', fechaOnboarding: r.fechaOnboarding || '' }; };
 // Plan del mes: propone la entrega de cada cliente para que Juan Pablo edite en fila y todo quede listo antes del tope
 function planDelMes(ym) {
   const fer = FER(), tope = topeDe(ym), ls = lotes(S.tareas), excl = new Set(), items = [], fuera = [], clis = [];
@@ -800,6 +838,28 @@ function svgBurnup(bu, ym, hoy) {
 const pendientesPipeline = () => { const pip = {}; lotes(S.tareas).forEach(l => Object.values(l.piezas).forEach(p => { const f = faseDe(p, l.lote); pip[f] = (pip[f] || 0) + 1; })); return pip; };
 
 
+// ═════════ CAPACIDAD Y CONTRATACIÓN ═════════
+const ROL_CONTRATAR = [['edicion', 'editor'], ['guion', 'copywriter'], ['calidad', 'revisor de calidad'], ['trafico', 'trafficker']];
+function htmlContratacion() {
+  const hm = mesInicial(), meses = [hm, mesAdd(hm, 1), mesAdd(hm, 2)], tipico = clienteTipico(), um = umbral(), cap = meses.map(m => capacidadActual(m));
+  // Por ROL, juntando las horas de todas las personas que lo pueden hacer (ej.: copy = Alejandra + Evonny si ella tiene el rol «guion»)
+  const pools = ROL_CONTRATAR.map(r => {
+    const ps = S.equipo.filter(p => p.activo !== 'NO' && String(p.roles || '').split(',').map(x => x.trim()).indexOf(r[0]) >= 0).map(p => p.nombre);
+    if (!ps.length) return null;
+    const ms = cap.map(c => { const xs = c.filter(x => ps.indexOf(x.nombre) >= 0), capT = xs.reduce((a, x) => a + x.cap, 0), dem = xs.reduce((a, x) => a + x.demanda, 0), mar = xs.filter(x => x.margen !== null); return { pct: capT ? dem / capT : 0, margen: mar.length ? mar.reduce((a, x) => a + x.margen, 0) : null }; });
+    const cerca = ms.slice(0, 2), mars = ms.map(x => x.margen).filter(v => v !== null), marMin = mars.length ? Math.min.apply(null, mars) : null;
+    const rojo = cerca.some(x => x.pct > um) || cerca.some(x => x.margen !== null && x.margen < tipico);
+    const amar = !rojo && (ms.some(x => x.pct > 0.7) || (marMin !== null && marMin < 2 * tipico));
+    return { rol: r[1], ps, ms, marMin, nivel: rojo ? 'rojo' : (amar ? 'amarillo' : 'verde') };
+  }).filter(Boolean);
+  const rojos = pools.filter(f => f.nivel === 'rojo'), amars = pools.filter(f => f.nivel === 'amarillo'), nom = f => esc(f.rol) + ' (' + f.ps.map(esc).join(' + ') + ')';
+  const cls = x => x > um ? 'cg-over' : (x > 0.7 ? 'cg-warn' : 'cg-ok');
+  let h = '<div class="card"><h4 style="margin-bottom:4px">Capacidad y contratación</h4><p class="sub" style="margin-bottom:8px">Mira los próximos 3 ciclos y junta las horas de todas las personas que pueden hacer cada rol. Avisa <b>antes</b> de saturarte: en amarillo conviene ir armando la búsqueda; en rojo ya no cabe un cliente típico de <b>' + tipico + ' piezas</b> (se cambia en Ajustes) o el equipo de ese rol pasa del ' + Math.round(um * 100) + '%. Para que alguien más cubra copy con sus horas libres, ponle el rol «guion» en Ajustes → Equipo.</p>';
+  h += rojos.length ? '<div class="alert r">Es momento de abrir la búsqueda: <b>' + rojos.map(nom).join(', ') + '</b>.</div>' : (amars.length ? '<div class="alert w">Ve armando la búsqueda de: <b>' + amars.map(nom).join(', ') + '</b>. Todavía hay espacio, pero se está acabando.</div>' : '<div class="alert i">El equipo tiene espacio para crecer en los próximos 3 ciclos.</div>');
+  h += '<div class="scroll"><table class="tbl tb"><thead><tr><th>Rol a contratar</th><th>Quiénes lo cubren</th>' + meses.map(m => '<th>' + mesLabel(m) + '</th>').join('') + '<th>Piezas más que caben</th><th>Estado</th></tr></thead><tbody>' + pools.map(f => '<tr><td><b>' + esc(f.rol) + '</b></td><td>' + f.ps.map(esc).join(' + ') + '</td>' + f.ms.map(x => '<td><span class="badge ' + cls(x.pct) + '">' + Math.round(x.pct * 100) + '%</span></td>').join('') + '<td>' + (f.marMin === null ? '<span class="sub">—</span>' : '<b>' + f.marMin + '</b>') + '</td><td><span class="badge ' + (f.nivel === 'rojo' ? 'cg-over' : (f.nivel === 'amarillo' ? 'cg-warn' : 'cg-ok')) + '">' + (f.nivel === 'rojo' ? 'Contratar ya' : (f.nivel === 'amarillo' ? 'Planificar' : 'Con espacio')) + '</span></td></tr>').join('') + '</tbody></table></div></div>';
+  return h;
+}
+
 // ═════════ COLA DE EDICIÓN ═════════
 const ESTCOLA = { ok: ['cg-ok', 'A tiempo'], justo: ['cg-warn', 'Se pasa de su fecha'], tarde: ['cg-over', 'No llega al tope'], sin: ['cg-na', 'Sin responsable'] };
 function htmlCola() {
@@ -849,6 +909,7 @@ function vDashboard() {
   if (al.length) h += '<div class="alert w">' + al.join('<br>') + '</div>';
 
   h += htmlCola();
+  h += htmlContratacion();
   h += '<div class="card"><h4 style="margin-bottom:8px">Entregas del mes por cliente</h4>';
   if (!R.lotes.length) h += '<div class="empty">Ningún lote se entrega en ' + mesLabel(ym) + '. Genera los lotes en <b>Clientes</b>.</div>';
   else {
@@ -896,7 +957,7 @@ function vTablero() {
       let tot = 0;
       const celdas = Array.from({ length: n }, (_, i) => {
         const f = ym + '-' + pad(i + 1), cap = horasDelDia(p, f, fer), hoyC = f === S.hoy ? ' hoy' : '';
-        if (!cap) { const aus = esLab(f, fer) && enAusencia(p, f); return '<td class="off' + (aus ? ' aus' : '') + hoyC + '"' + (aus ? ' title="' + esc(p.nombre + ' · ausente') + '"' : '') + '></td>'; }
+        if (!cap) { const aus = esLab(f, feriadosDe(p, fer)) && enAusencia(p, f), feriCO = p.pais === 'CO' && parse(f).getDay() !== 0 && !esLab(f, feriadosDe(p, fer)); return '<td class="off' + (aus ? ' aus' : '') + hoyC + '"' + (aus ? ' title="' + esc(p.nombre + ' · ausente') + '"' : (feriCO ? ' title="' + esc(p.nombre + ' · feriado de Colombia') + '"' : '')) + '></td>'; }
         const v = (carga[p.nombre] || {})[f] || 0; tot += v;
         const dd = det[p.nombre + '|' + f], tt = dd ? Object.keys(dd).map(k => k + (dd[k] > 1 ? ' ×' + dd[k] : '')).join(', ') : 'libre';
         return '<td class="c' + (v ? ' cg-' + nivel(v, cap, 1.0) : '') + hoyC + '" title="' + esc(p.nombre + ' · ' + dm(f) + ' · ' + Math.round(v * 10) / 10 + ' h de ' + cap + ' h · ' + tt) + '">' + (v ? Math.round(v * 10) / 10 : '') + '</td>';
@@ -972,18 +1033,19 @@ function vMis() {
 const fechaFase = (f, p, L) => { const t = (f === 'En guionización' && p.guion) || (f === 'En edición' && p.edicion) || (f === 'En control de calidad' && p.calidad) || ((f === 'En revisión del cliente' || f === 'Reenviado a revisión') && p.revvideo) || (f === 'Guion en revisión del cliente' && L.aprobguion) || (f === 'Esperando grabación o material' && (L.material || L.grabacion)) || (f === 'Listo para entregar' && L.entrega) || (f === 'Requiere actualización' && (p.revvideo || p.edicion)); return t ? t.fecha : ''; };
 const tareaFase = (f, p, L) => (f === 'En guionización' && p.guion) || (f === 'En edición' && p.edicion) || (f === 'En control de calidad' && p.calidad) || ((f === 'En revisión del cliente' || f === 'Reenviado a revisión') && p.revvideo) || (f === 'Guion en revisión del cliente' && L.aprobguion) || (f === 'Esperando grabación o material' && (L.material || L.grabacion)) || (f === 'Listo para entregar' && L.entrega) || (f === 'Requiere actualización' && ((p.revvideo && p.revvideo.estado === 'Con cambios') ? p.revvideo : (p.calidad && p.calidad.estado === 'Con cambios' ? p.calidad : p.edicion))) || p.guion || p.edicion || null;
 function filaPieza(r) {
-  const { l, pz, p, f } = r, L = l.lote, rv = p.revvideo, rd = rv ? (parseInt(rv.rondas) || 0) : 0, max = rondasMax(), items = checklistItems();
+  const { l, pz, p, f } = r, L = l.lote, rv = p.revvideo, rd = rv ? (parseInt(rv.rondas) || 0) : 0, max = rondasMax(), rc = p.guion ? (parseInt(p.guion.rondas) || 0) : 0, maxc = rondasCopy(), items = checklistItems();
   const at = 'data-cid="' + esc(l.clienteId) + '" data-ciclo="' + esc(l.ciclo) + '" data-pz="' + esc(pz) + '"';
   const b = (act, txt, cls, ic) => '<button class="btn sm ' + (cls || '') + '" data-act="' + act + '" ' + at + '>' + (ic ? '<i class="ti ' + ic + '"></i>' : '') + txt + '</button>';
   let acc = '';
   if (f === 'En guionización') acc = b('pz-guion', 'Guion listo', 'p', 'ti-check');
+  else if ((f === 'Guion en revisión del cliente' || f === 'Esperando grabación o material') && p.guion) acc = b('pz-copycambios', 'Cliente pidió ajuste al guion', 'd', 'ti-arrow-back-up');
   else if (f === 'En edición') acc = b('pz-edit', 'Edición lista', 'p', 'ti-check');
   else if (f === 'En control de calidad') acc = b('pz-qaok', 'Aprobar', 'p', 'ti-check') + b('pz-qacambios', 'Pedir cambios', 'd', 'ti-arrow-back-up');
   else if (f === 'En revisión del cliente' || f === 'Reenviado a revisión') acc = b('pz-cliok', 'Cliente aprobó', 'p', 'ti-check') + b('pz-clicambios', 'Cliente pidió cambios', 'd', 'ti-arrow-back-up');
   else if (f === 'Requiere actualización') acc = (rv && rv.estado === 'Con cambios') ? b('pz-reenviar', 'Actualización lista → reenviar', 'p', 'ti-send') : b('pz-corregido', 'Corregido → a calidad', 'p', 'ti-check');
   const qa = f === 'En control de calidad' && p.calidad, ft = fechaFase(f, p, L), tk = tareaFase(f, p, L);
-  const notas = [p.edicion && p.edicion.notas, p.calidad && p.calidad.notas, rv && rv.notas].filter(Boolean)[0];
-  return '<div class="prow' + (qa ? ' qrow' : '') + '"' + (qa ? ' data-id="' + esc(p.calidad.id) + '"' : '') + ' style="border-bottom:1px solid var(--border);padding:10px 0"><div class="row" style="justify-content:space-between"><div><b>' + esc(loteLabel(l)) + '</b> · Pieza ' + esc(pz) + ' <span class="sub">(lote ' + MESES[+l.ciclo.slice(5, 7) - 1] + ')</span> <span class="badge b-' + (FASE_CLASE[f] || 'pend') + '">' + esc(f) + '</span>' + (rd ? ' <span class="badge ' + (rd > max ? 'b-over' : 'b-cambios') + '">Ronda ' + rd + ' de ' + max + (rd > max ? ' · fuera de alcance' : '') + '</span>' : '') + (qa && items.length ? ' <span class="badge b-vino">Checklist ' + marcados(p.calidad).filter(x => items.includes(x)).length + '/' + items.length + '</span>' : '') + (ft ? '<br><span class="sub">' + (ft < S.hoy && f !== 'Aprobado por el cliente' ? 'Vencía el ' : 'Para el ') + corta(ft) + '</span>' : '') + '</div><div class="row">' + acc + (tk ? '<button class="btn sm" data-act="tarea" data-id="' + esc(tk.id) + '">Abrir</button>' : '') + '</div></div>' +
+  const notas = (['En guionización', 'Guion en revisión del cliente', 'Esperando grabación o material'].includes(f) && p.guion && p.guion.notas) || [p.edicion && p.edicion.notas, p.calidad && p.calidad.notas, rv && rv.notas].filter(Boolean)[0];
+  return '<div class="prow' + (qa ? ' qrow' : '') + '"' + (qa ? ' data-id="' + esc(p.calidad.id) + '"' : '') + ' style="border-bottom:1px solid var(--border);padding:10px 0"><div class="row" style="justify-content:space-between"><div><b>' + esc(loteLabel(l)) + '</b> · Pieza ' + esc(pz) + ' <span class="sub">(lote ' + MESES[+l.ciclo.slice(5, 7) - 1] + ')</span> <span class="badge b-' + (FASE_CLASE[f] || 'pend') + '">' + esc(f) + '</span>' + (rc ? ' <span class="badge ' + (rc > maxc ? 'b-over' : 'b-cambios') + '">Copy: ajuste ' + rc + ' de ' + maxc + (rc > maxc ? ' · fuera de alcance' : '') + '</span>' : '') + (rd ? ' <span class="badge ' + (rd > max ? 'b-over' : 'b-cambios') + '">Edición: ronda ' + rd + ' de ' + max + (rd > max ? ' · fuera de alcance' : '') + '</span>' : '') + (qa && items.length ? ' <span class="badge b-vino">Checklist ' + marcados(p.calidad).filter(x => items.includes(x)).length + '/' + items.length + '</span>' : '') + (ft ? '<br><span class="sub">' + (ft < S.hoy && f !== 'Aprobado por el cliente' ? 'Vencía el ' : 'Para el ') + corta(ft) + '</span>' : '') + '</div><div class="row">' + acc + (tk ? '<button class="btn sm" data-act="tarea" data-id="' + esc(tk.id) + '">Abrir</button>' : '') + '</div></div>' +
     (qa && items.length ? '<div class="row" style="margin-top:8px;gap:14px">' + items.map(it => '<label class="chk"><input type="checkbox" data-chk="' + esc(p.calidad.id) + '" value="' + esc(it) + '" ' + (marcados(p.calidad).includes(it) ? 'checked' : '') + '> ' + esc(it) + '</label>').join('') + '</div>' : '') +
     (notas ? '<div class="sub" style="margin-top:6px">Notas: ' + esc(notas) + '</div>' : '') + '</div>';
 }
@@ -1116,14 +1178,14 @@ async function confirmarRetraso() {
 function abrirFechas(id) {
   const c = S.clientes.find(x => x.id === id); if (!c) return;
   const cr = cronoDe(id); ctxCli = id;
-  const personas = S.equipo.filter(p => p.activo !== 'NO'), chkAsig = () => '<div><label class="l">Grabación (marca a todas las que van)</label><div id="f-asig-grabacion" class="check-grid">' + personas.map(p => '<label><input type="checkbox" value="' + esc(p.id) + '" ' + (String(cr.asig.grabacion || '').split('+').indexOf(p.id) >= 0 ? 'checked' : '') + '> ' + esc(p.nombre) + '</label>').join('') + '</div></div>', selAsig = rol => '<div><label class="l">' + ({ guion: 'Guiones', grabacion: 'Grabación', edicion: 'Edición', calidad: 'Calidad' })[rol] + '</label><select id="f-asig-' + rol + '"><option value="">Automático</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.asig[rol] === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>';
+  const personas = S.equipo.filter(p => p.activo !== 'NO'), chkAsig = (rol, etiqueta) => '<div><label class="l">' + etiqueta + '</label><div id="f-asig-' + rol + '" class="check-grid">' + personas.map(p => '<label><input type="checkbox" value="' + esc(p.id) + '" ' + (String(cr.asig[rol] || '').split('+').indexOf(p.id) >= 0 ? 'checked' : '') + '> ' + esc(p.nombre) + '</label>').join('') + '</div></div>', selAsig = rol => '<div><label class="l">' + ({ guion: 'Guiones', grabacion: 'Grabación', edicion: 'Edición', calidad: 'Calidad' })[rol] + '</label><select id="f-asig-' + rol + '"><option value="">Automático</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.asig[rol] === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>';
   openModal('<h3>Fechas y reglas · ' + esc(c.nombre) + '</h3><div class="sub">' + c.piezas + ' piezas al mes, todas en una sola entrega</div>' +
     '<label class="l">Las 3 fechas de cada mes (día del mes)</label><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px"><div><label class="l" style="margin-top:0">Enviamos los guiones</label><input type="number" id="f-dgui" min="1" max="31" value="' + (cr.dGuiones || '') + '" placeholder="automático"></div><div><label class="l" style="margin-top:0">' + (incluyeDe(c).includes('grabacion') ? 'Grabamos' : 'Nos entregan el material') + '</label><input type="number" id="f-dmat" min="1" max="31" value="' + (cr.dMaterial || '') + '" placeholder="automático"></div><div><label class="l" style="margin-top:0">Entregamos lo editado</label><input id="f-entregas" value="' + esc(cr.entregas.join(', ')) + '" placeholder="Ej: 20"></div></div>' +
     '<div class="sub" style="margin-top:4px">Ponlas tú, contando solo días hábiles (lunes a sábado, sin domingos ni feriados). Si dejas guiones y material vacíos, el sistema los calcula hacia atrás desde la entrega. Abajo te dice si los plazos alcanzan.</div><div id="f-eval" class="alert i" style="margin-top:8px"></div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Días que tarda en aprobar</label><input type="number" id="f-dapr" min="1" value="' + (cr.diasAprob || '') + '" placeholder="' + diasAprob() + ' (general)"></div><div><label class="l">Días que tarda en grabar</label><input type="number" id="f-dgrab" min="1" value="' + (cr.diasGrab || '') + '" placeholder="' + diasGrab() + ' (general)"></div></div><div class="sub" style="margin-top:4px">Déjalos vacíos para usar los días generales de Ajustes. Un cliente que graba muchos videos necesita más días.</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Primera entrega</label><input type="date" id="f-primera" value="' + esc(cr.primera) + '"></div><div><label class="l">Última entrega</label><input type="date" id="f-ultima" value="' + esc(cr.ultima) + '"></div></div><div class="sub" style="margin-top:4px"><b>Primera:</b> para un cliente nuevo, desde cuándo se le entrega (vacía si ya está en marcha). <b>Última:</b> llénala cuando sepas que NO renueva: dejan de proyectarse sus lotes (se libera su capacidad) y el último lleva el cierre ordenado.</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px"><div><label class="l">Fecha del onboarding</label><input type="date" id="f-onb" value="' + esc(cr.onboarding) + '"></div><div><label class="l">Primera entrega</label><input type="date" id="f-primera" value="' + esc(cr.primera) + '"></div><div><label class="l">Última entrega</label><input type="date" id="f-ultima" value="' + esc(cr.ultima) + '"></div></div><div class="sub" style="margin-top:4px"><b>Onboarding:</b> la sesión de 2 h con el cliente nuevo; desde ahí corre su investigación y se cuenta su primera entrega. <b>Primera:</b> para un cliente nuevo, desde cuándo se le entrega (vacía si ya está en marcha). <b>Última:</b> llénala cuando sepas que NO renueva: dejan de proyectarse sus lotes (se libera su capacidad) y el último lleva el cierre ordenado.</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Quién graba</label><select id="f-graba"><option value="" ' + (!cr.graba ? 'selected' : '') + '>Lo que diga el CRM</option><option value="cliente" ' + (cr.graba === 'cliente' ? 'selected' : '') + '>El cliente graba</option><option value="sinergia" ' + (cr.graba === 'sinergia' ? 'selected' : '') + '>Sinergia graba</option></select></div><div><label class="l">Prioridad en la cola de edición</label><input type="number" id="f-prio" min="1" value="' + (cr.prio || '') + '" placeholder="Automática"></div></div><div class="sub" style="margin-top:4px">Si el CRM dice que grabamos pero no es así (o al revés), corrígelo aquí. Prioridad: 1 edita primero; vacío = el que más edición lleva va primero.</div>' +
-    '<label class="l">Quién hace qué en este cliente</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + selAsig('guion') + chkAsig() + selAsig('edicion') + selAsig('calidad') + '</div><div class="sub" style="margin-top:4px">«Automático» usa a la primera persona con ese rol. Útil cuando hay un segundo editor o guionista.</div>' +
+    '<label class="l">Quién hace qué en este cliente</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + selAsig('guion') + chkAsig('grabacion', 'Grabación (marca a todas las que van)') + chkAsig('onboarding', 'Onboarding (marca a todas las que van; vacío = lo que diga Ajustes)') + selAsig('edicion') + selAsig('calidad') + '</div><div class="sub" style="margin-top:4px">«Automático» usa a la primera persona con ese rol. Útil cuando hay un segundo editor o guionista.</div>' +
     '<label class="l">Otra persona que también escribe guiones de este cliente</label><div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><select id="f-coautor"><option value="">Nadie: los escribe quien tiene el rol</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.coautor === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select><input type="number" id="f-copz" min="0" value="' + (cr.coautorPiezas || '') + '" placeholder="Cuántos"></div><div class="sub" style="margin-top:4px">Por cada entrega: esa persona escribe ese número de guiones (en sus propias horas) y el resto, quien tiene el rol de guion.</div>' +
     '<label class="l">Quién aprueba de su lado</label><input id="f-aprob" value="' + esc(cr.aprobador) + '"><label class="l">Notas (canal de aprobación, horarios, cuándo graba…)</label><textarea id="f-notas" rows="2">' + esc(cr.notas) + '</textarea>' +
     '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="fechas-ok">Guardar</button></div>');
@@ -1138,8 +1200,13 @@ function evalFechasUI() {
   if (!(dE >= 1 && dE <= MAX_DIA) || String($('f-entregas').value).indexOf(',') >= 0) { box.className = 'alert i'; box.innerHTML = 'Pon el día de entrega (un solo día) y te digo qué fechas alcanzan.'; return; }
   const r = evaluarFechas(c, ym, dG, dM, dE), n = r.nat; if (!n) { box.innerHTML = ''; return; }
   const auto = (r.g ? 'guiones el <b>' + corta(n.envio) + '</b>, ' : '') + (r.ed ? (incluyeDe(c).includes('grabacion') ? 'grabación hasta el <b>' : 'material el <b>') + corta(n.material) + '</b>, ' : '') + 'entrega el <b>' + corta(r.E) + '</b>';
+  const onbF = $('f-onb') && $('f-onb').value, ls0 = lotes(S.tareas).some(l => l.clienteId === c.id);
+  const avisoOnb = (onbF && !ls0 && n.wr) ? (() => { const ini = addLab(nextLab(onbF, FER()), diasInv(), FER()); return n.wr.ini < ini ? '⚠ Onboarding el ' + corta(nextLab(onbF, FER())) + ' + ' + diasInv() + ' días de investigación: su contenido recién puede empezar el ' + corta(ini) + ', pero con esa entrega el equipo tendría que empezar el ' + corta(n.wr.ini) + '. Usa el Simulador para ver la primera entrega posible.' : '✓ Onboarding el ' + corta(nextLab(onbF, FER())) + ' + ' + diasInv() + ' días de investigación: el contenido empieza el ' + corta(ini) + ', a tiempo.'; })() : '';
+  const hueco = (onbF && !ls0) ? huecoOnboarding(c, onbF) : null;
+  const avisoHueco = hueco && !hueco.ok ? '⚠ El ' + corta(nextLab(onbF, FER())) + ' ' + hueco.quien + ' ya tiene el día lleno: el onboarding (2 h, las dos a la vez) cabe el ' + corta(hueco.siguiente) + '.' : (hueco && hueco.personas.length > 1 ? '✓ El onboarding ese día cabe para ' + hueco.personas.map(p => p.nombre).join(' y ') + ' (en paralelo).' : '');
+  const extraOnb = [avisoOnb, avisoHueco].filter(Boolean).join('<br>'), hayAviso = /^⚠/.test(avisoOnb) || /^⚠/.test(avisoHueco);
   const h = '<b>' + mesLabel(ym) + '</b>: ';
-  if (!dG && !dM) { box.className = 'alert i'; box.innerHTML = h + 'con esa entrega, el sistema pone solo: ' + auto + '. Si quieres fijarlas tú, llena guiones y material.'; return; }
+  if (!dG && !dM) { box.className = 'alert ' + (hayAviso ? 'w' : 'i'); box.innerHTML = h + 'con esa entrega, el sistema pone solo: ' + auto + '. Si quieres fijarlas tú, llena guiones y material.' + (extraOnb ? '<br>' + extraOnb : ''); return; }
   if (!dG || !dM) { box.className = 'alert w'; box.innerHTML = h + 'pon las tres fechas, o deja guiones y material vacíos para que sean automáticos.'; return; }
   if (!r.orden) { box.className = 'alert r'; box.innerHTML = h + 'las fechas deben ir en orden: guiones (' + corta(r.S) + ') → material (' + corta(r.M) + ') → entrega (' + corta(r.E) + ').'; return; }
   const okC = !r.g || !r.ed || r.cliente >= r.necCliente, okE = !r.ed || r.equipo >= r.necEquipo, dias = x => x + ' día' + (x === 1 ? '' : 's') + ' hábil' + (x === 1 ? '' : 'es');
@@ -1147,7 +1214,8 @@ function evalFechasUI() {
   if (r.g && r.ed) ls.push((okC ? '✓' : '⚠') + ' Del envío de guiones al material hay ' + dias(r.cliente) + '; el cliente necesita al menos ' + dias(r.necCliente) + ' (aprobar y grabar).');
   const justo = r.ed && !okE && r.equipo >= r.necEquipo - colchon();
   if (r.ed) ls.push(okE ? '✓ Del material a la entrega hay ' + dias(r.equipo) + '; el equipo necesita ' + dias(r.necEquipo) + ' (editar ' + c.piezas + ' piezas y revisar la calidad).' : (justo ? '⚠ Del material a la entrega hay ' + dias(r.equipo) + ': alcanza justo, sin colchón (con el colchón de ' + colchon() + ' día' + (colchon() === 1 ? '' : 's') + ' el equipo necesita ' + dias(r.necEquipo) + ').' : '⚠ Del material a la entrega hay ' + dias(r.equipo) + '; el equipo necesita al menos ' + dias(r.necEquipo) + ' (editar ' + c.piezas + ' piezas y revisar la calidad).'));
-  box.className = 'alert ' + (okC && okE ? 'i' : 'w');
+  if (extraOnb) ls.push(extraOnb);
+  box.className = 'alert ' + (okC && okE && !hayAviso ? 'i' : 'w');
   box.innerHTML = h + ls.join('<br>') + (okC && okE ? '' : '<br>Lo mínimo que alcanza con esa entrega: ' + auto + '. <button class="btn sm" data-act="f-auto" style="margin-left:6px">Usar esas fechas</button>');
 }
 function autoFechas() {
@@ -1168,8 +1236,8 @@ async function guardarFechas() {
   if (dg && !(dg < dm_ && dm_ < nums[0])) { alert('Las fechas deben ir en orden: guiones, luego material, luego entrega'); return; }
   const pri = $('f-primera').value, ult = $('f-ultima').value;
   if (pri && ult && ult < pri) { alert('La última entrega no puede ser antes de la primera'); return; }
-  const asg = ['guion', 'grabacion', 'edicion', 'calidad'].map(r => { const v = r === 'grabacion' ? Array.from(document.querySelectorAll('#f-asig-grabacion input:checked')).map(i => i.value).join('+') : $('f-asig-' + r).value; return v ? r + ':' + v : ''; }).filter(Boolean).join(',');
-  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim(), coautor: co && copz ? co : '', coautorPiezas: co && copz ? copz : '', diasAprob: parseInt($('f-dapr').value) || '', diasGrab: parseInt($('f-dgrab').value) || '', diaGuiones: dg || '', diaMaterial: dm_ || '', primeraEntrega: pri, ultimaEntrega: ult, asignaciones: asg, graba: $('f-graba').value, prioridad: parseInt($('f-prio').value) || '' };
+  const asg = ['guion', 'grabacion', 'onboarding', 'edicion', 'calidad'].map(r => { const v = (r === 'grabacion' || r === 'onboarding') ? Array.from(document.querySelectorAll('#f-asig-' + r + ' input:checked')).map(i => i.value).join('+') : $('f-asig-' + r).value; return v ? r + ':' + v : ''; }).filter(Boolean).join(',');
+  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim(), coautor: co && copz ? co : '', coautorPiezas: co && copz ? copz : '', diasAprob: parseInt($('f-dapr').value) || '', diasGrab: parseInt($('f-dgrab').value) || '', diaGuiones: dg || '', diaMaterial: dm_ || '', fechaOnboarding: $('f-onb').value, primeraEntrega: pri, ultimaEntrega: ult, asignaciones: asg, graba: $('f-graba').value, prioridad: parseInt($('f-prio').value) || '' };
   closeModal(); loading(true, 'Guardando…');
   try { const r = await api('saveCronograma', { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
@@ -1228,23 +1296,30 @@ async function guardarExtra(desc, tipo, cid) {
 const planSim = f => construirPlan({ entrega: f, tanda: 1, tandas: 1, piezas: sim.piezas, incluye: sim.incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), investigacion: sim.inv }).plan;
 function calcSim() {
   const incl = Array.from(document.querySelectorAll('#sim-incl input:checked')).map(i => i.value), piezas = parseInt($('sim-piezas').value) || 0, inv = $('sim-inv').checked;
-  sim = { piezas, incl, inv, res: null };
+  const entra = ($('sim-entra').value || S.hoy), invd = Math.max(0, parseInt($('sim-invd').value) || 0), fer = FER();
+  sim = { piezas, incl, inv, entra: $('sim-entra').value, invd, res: null };
   if (piezas > 0) {
     const hm = S.hoy.slice(0, 7), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 2)));
-    const found = buscarEntregas({ desde: S.hoy, hoy: S.hoy, piezas, incluye: incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), tareas, umbral: umbral(), investigacion: inv });
-    sim.res = { found, cap: capacidadActual(hm).filter(x => x.margen !== null).sort((a, b) => a.margen - b.margen) };
+    // la sesión de onboarding (2 h de cada persona) va el primer día en que todas tengan hueco
+    const ocup0 = cargaDiaria(tareas, S.equipo, '0000-00-00', '9999-99-99', true), pOnb = personasDe('onboarding', S.equipo, { onboarding: onboardingSim(incl) }), eO = S.etapas.find(e => e.key === 'onboarding'), hOnb = eO ? num(eO.horas, 2) : 0, f0 = nextLab(entra, fer);
+    let fOnb = f0, lleno = '';
+    if (inv && hOnb > 0 && pOnb.length) for (let i = 0; i < 40; i++) { const q = pOnb.find(p => capDisp(p, fOnb, fer, ocup0) + 1e-9 < hOnb); if (!q) break; if (!lleno) lleno = q.nombre; fOnb = nextLab(addDays(fOnb, 1), fer); }
+    const movido = inv && fOnb !== f0 ? { de: f0, a: fOnb, quien: lleno } : null, inicioMin = inv ? addLab(fOnb, invd, fer) : f0;
+    const found = buscarEntregas({ desde: entra > S.hoy ? entra : S.hoy, inicioMin, asig: { onboarding: onboardingSim(incl) }, fechaOnb: inv ? fOnb : null, invDias: invd, hoy: S.hoy, piezas, incluye: incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), tareas, umbral: umbral(), investigacion: inv });
+    sim.res = { inicioMin, movido, found, cap: capacidadActual(hm).filter(x => x.margen !== null).sort((a, b) => a.margen - b.margen) };
   }
   render();
 }
 function vSimulador() {
   let h = '<div class="head"><h2>Simulador de nuevos clientes</h2></div><p class="sub" style="margin-bottom:10px">Antes de ofrecer un cupo: ¿en qué fecha podría recibir su contenido sin que nadie se pase de sus horas? Se suma su trabajo a todo lo que ya está comprometido.</p>';
-  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div></div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sim-inv" style="width:auto" ' + (sim.inv ? 'checked' : '') + '> Incluir la investigación inicial (8 h de Alejandra)</label><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
+  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div><div><label class="l">Fecha del onboarding</label><input type="date" id="sim-entra" value="' + esc(sim.entra || S.hoy) + '"></div><div><label class="l">Investigación y onboarding (días hábiles)</label><input type="number" id="sim-invd" min="0" value="' + (sim.invd == null ? diasInv() : sim.invd) + '" style="width:120px"></div></div><div class="sub" style="margin-top:4px">Tu proceso dice 7 a 15 días. Es tiempo corrido del cliente (brief, accesos, estrategia); el trabajo nuestro son 8 h. Nada de su contenido puede empezar antes de que termine.</div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sim-inv" style="width:auto" ' + (sim.inv ? 'checked' : '') + '> Incluir la investigación inicial (8 h de Alejandra)</label><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
   if (sim.res) {
     const r = sim.res, cu = r.cap[0];
     if (cu) h += '<div class="alert ' + (sim.piezas > cu.margen ? 'r' : 'i') + '">Hoy, con lo que ya tienen contratado, el cuello de botella es <b>' + esc(cu.nombre) + '</b> (' + Math.round(cu.pct * 100) + '% de ' + (cu.enVentana ? 'su tramo de edición' : 'su mes') + '): caben <b>≈ ' + cu.margen + ' piezas más en este ciclo</b> sin pasar del ' + Math.round(umbral() * 100) + '%.' + (sim.piezas > cu.margen ? ' Un cliente de ' + sim.piezas + ' piezas <b>supera ese margen</b>: haría falta más horas de ' + esc(cu.nombre) + ' o alguien más.' : '') + '</div>';
+    if (r.movido) h += '<div class="alert w">El ' + corta(r.movido.de) + ' <b>' + esc(r.movido.quien) + '</b> ya tiene el día lleno: la sesión de onboarding (2 h) se puede hacer el <b>' + corta(r.movido.a) + '</b>, y la investigación cuenta desde ahí.</div>';
     if (r.found.length) {
-      h += '<div class="alert g"><b>Sí cabe.</b> Estas son las primeras fechas de entrega posibles (empezando desde hoy):</div>';
-      h += r.found.map((f, i) => { const pl = planSim(f.entrega), ev = f.ev; return '<div class="card"><div class="row" style="justify-content:space-between"><h4>' + (i === 0 ? 'La más cercana: ' : 'Opción ' + (i + 1) + ': ') + 'entrega el ' + corta(f.entrega) + '</h4><span class="badge ' + (ev.pico.ratio <= 1 ? 'b-listo' : 'b-warn') + '">Día más cargado: ' + esc(ev.pico.persona || '—') + ' al ' + Math.round(ev.pico.ratio * 100) + '%</span></div><div class="scroll"><table class="tbl tb"><thead><tr><th>Empieza</th><th>Escribe</th><th>Envía guiones</th><th>Cliente aprueba</th><th>Cliente graba</th><th>Edita</th><th>Entrega</th><th>Cliente revisa</th></tr></thead><tbody><tr><td>' + dm(ev.desde) + '</td><td>' + rango(pl.wr ? [pl.wr.ini, pl.wr.fin] : null) + '</td><td>' + (pl.envio ? dm(pl.envio) : '—') + '</td><td>' + rango(pl.aprueba) + '</td><td>' + rango(pl.grab) + '</td><td>' + rango(pl.ed ? [pl.ed.ini, pl.ed.fin] : null) + '</td><td><b>' + dm(pl.entrega) + '</b></td><td>' + rango(pl.revision) + '</td></tr></tbody></table></div></div>'; }).join('');
+      h += '<div class="alert g"><b>Sí cabe.</b> Estas son las primeras fechas de entrega posibles' + (sim.inv ? ' (la investigación termina el <b>' + corta(r.inicioMin) + '</b>; recién ahí empieza su contenido)' : '') + ':</div>';
+      h += r.found.map((f, i) => { const pl = planSim(f.entrega), ev = f.ev; return '<div class="card"><div class="row" style="justify-content:space-between"><h4>' + (i === 0 ? 'La más cercana: ' : 'Opción ' + (i + 1) + ': ') + 'se le promete el ' + corta(addLab(f.entrega, colchon(), FER())) + '</h4><span class="badge ' + (ev.pico.ratio <= 1 ? 'b-listo' : 'b-warn') + '">Día más cargado: ' + esc(ev.pico.persona || '—') + ' al ' + Math.round(ev.pico.ratio * 100) + '%</span></div><div class="scroll"><table class="tbl tb"><thead><tr><th>Empieza</th><th>Escribe</th><th>Envía guiones</th><th>Cliente aprueba</th><th>Cliente graba</th><th>Edita</th><th>Entrega</th><th>Cliente revisa</th></tr></thead><tbody><tr><td>' + dm(ev.desde) + '</td><td>' + rango(pl.wr ? [pl.wr.ini, pl.wr.fin] : null) + '</td><td>' + (pl.envio ? dm(pl.envio) : '—') + '</td><td>' + rango(pl.aprueba) + '</td><td>' + rango(pl.grab) + '</td><td>' + rango(pl.ed ? [pl.ed.ini, pl.ed.fin] : null) + '</td><td><b>' + dm(pl.entrega) + '</b></td><td>' + rango(pl.revision) + '</td></tr></tbody></table></div></div>'; }).join('');
       const horas = {}; r.found[0].ev.tasks.forEach(t => { if (t.responsable === 'Cliente') return; const k = t.responsable || 'Sin asignar'; horas[k] = (horas[k] || 0) + t.horas; });
       h += '<div class="card"><h4 style="margin-bottom:8px">Trabajo que sumaría al equipo</h4><div class="scroll"><table class="tbl"><thead><tr><th>Persona</th><th>Horas del lote</th><th>Frente a su semana</th></tr></thead><tbody>' + Object.keys(horas).map(n => { const p = persona(n), hh = Math.round(horas[n] * 10) / 10, cs = p ? capSemNom(p) : 0; return '<tr><td>' + esc(n) + '</td><td>' + hh + ' h</td><td class="cg cg-' + nivel(hh, cs, 1.0) + '">' + (cs ? Math.round(hh / cs * 100) + '% de su semana (' + cs + ' h)' : '—') + '</td></tr>'; }).join('') + '</tbody></table></div><p class="sub" style="margin-top:6px">Las tareas «Sin asignar» necesitan que alguien tenga ese rol (Ajustes).</p></div>';
     } else h += '<div class="alert r"><b>No hay una fecha en las próximas semanas que no sobrecargue a alguien.</b> Revisa el Tablero para ver quién está lleno, o suma horas de esa persona en Ajustes.</div>';
@@ -1262,6 +1337,14 @@ function feriadosDelAnio(y) {
   semanaSanta(y).forEach((f, i) => { set[f] = i ? 'Viernes Santo' : 'Jueves Santo'; });
   return Object.keys(set).sort().map(f => [f, set[f]]);
 }
+function htmlFeriadosCO() {
+  const quienes = S.equipo.filter(p => p.activo !== 'NO' && p.pais === 'CO').map(p => p.nombre); if (!quienes.length) return '';
+  const y0 = +S.hoy.slice(0, 4), extra = String(S.config.feriadosCO || '').split(',').map(s => s.trim()).filter(Boolean);
+  return '<div class="card"><h4 style="margin-bottom:4px">Feriados de Colombia (' + quienes.map(esc).join(', ') + ')</h4><p class="sub" style="margin-bottom:8px">Esa persona trabaja los feriados de Perú que no son de Colombia y descansa los de Colombia. Se calculan solos cada año (la mayoría se pasa al lunes, y desde 2026 hay uno más: Nuestra Señora del Rosario de Chiquinquirá).</p>' + [y0, y0 + 1].map(y => {
+    const l = feriadosColombia(y).concat(extra.filter(x => x.indexOf(y + '-') === 0)).sort(), porMes = {}; l.forEach(f => { (porMes[+f.slice(5, 7)] = porMes[+f.slice(5, 7)] || []).push(corta(f)); });
+    return '<div style="margin-top:8px"><b>' + y + '</b> <span class="sub">' + l.length + ' días</span><div class="scroll"><table class="tbl tb"><tbody>' + Object.keys(porMes).map(m => '<tr><td style="width:110px"><b>' + MESES_L[m - 1] + '</b></td><td>' + porMes[m].map(esc).join(' · ') + '</td></tr>').join('') + '</tbody></table></div></div>';
+  }).join('') + '</div>';
+}
 function htmlFeriados() {
   const y0 = +S.hoy.slice(0, 4);
   return '<div class="card"><h4 style="margin-bottom:4px">Feriados de Perú, mes por mes</h4><p class="sub" style="margin-bottom:8px">Con estos días el sistema no programa trabajo. Jueves y Viernes Santo se calculan solos cada año; los feriados de fecha fija vienen de la lista de arriba. Si el Gobierno decreta un día no laborable (puente), agrégalo arriba como AAAA-MM-DD.</p>' + [y0, y0 + 1].map(y => {
@@ -1274,14 +1357,15 @@ const ANC = [['investigacion', 'Antes de escribir'], ['escritura', 'Bloque de es
 const filaEtapa = e => '<tr data-key="' + esc(e.key) + '" data-orden="' + esc(e.orden) + '"><td><input data-f="nombre" value="' + esc(e.nombre) + '" style="width:190px"></td><td><input data-f="rol" value="' + esc(e.rol) + '" style="width:90px"></td><td><select data-f="alcance">' + optH(ALC, e.alcance || 'pieza') + '</select></td><td><select data-f="ancla">' + optH(ANC, e.ancla || 'entrega') + '</select></td><td><input data-f="offsetDias" type="number" value="' + esc(e.offsetDias || '0') + '" style="width:56px"></td><td><input data-f="horas" type="number" min="0" step="0.05" value="' + esc(e.horas || '0') + '" style="width:64px"></td><td><select data-f="requiere">' + optH(SVC, e.requiere) + '</select></td><td><select data-f="excluye">' + optH(SVC, e.excluye) + '</select></td><td><select data-f="calendario"><option ' + (e.calendario === 'SI' ? 'selected' : '') + '>SI</option><option ' + (e.calendario !== 'SI' ? 'selected' : '') + '>NO</option></select></td><td><input data-f="guia" value="' + esc(e.guia || '') + '" style="width:220px"></td><td><button class="btn sm d" data-act="et-del"><i class="ti ti-x"></i></button></td></tr>';
 function vAjustes() {
   let h = '<div class="head"><h2>Ajustes</h2></div><div class="alert i">Aquí está lo que mueve todos los cálculos: las horas reales de cada persona y cuánto tarda cada etapa. Ajústalo cuando cambie el equipo; el tablero, los lotes y el simulador se recalculan.</div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Equipo y horas</h4><p class="sub" style="margin-bottom:8px">Horas de trabajo por día: de lunes a viernes y el sábado (hasta el mediodía). Roles separados por coma: guion, grabacion, edicion, calidad, trafico. Si cambias el nombre de alguien, sus tareas se actualizan solas.</p><div class="scroll"><table class="tbl" id="t-eq"><thead><tr><th>Nombre</th><th>Roles</th><th>Horas L–V</th><th>Horas sáb</th><th>Semana</th><th>Ausencias</th><th>Activo</th><th></th></tr></thead><tbody>' +
-    S.equipo.map(p => '<tr data-id="' + esc(p.id) + '"><td><input data-f="nombre" value="' + esc(p.nombre) + '" style="width:130px"></td><td><input data-f="roles" value="' + esc(p.roles) + '" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="' + esc(p.horasDia === '' || p.horasDia == null ? 8 : p.horasDia) + '" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="' + esc(p.horasSab === '' || p.horasSab == null ? 4 : p.horasSab) + '" style="width:70px"></td><td><span class="sub">' + capSemNom(p) + ' h</span></td><td><input data-f="ausencias" value="' + esc(p.ausencias || '') + '" placeholder="2026-12-20/2027-01-03" style="width:190px"></td><td><select data-f="activo"><option ' + (p.activo !== 'NO' ? 'selected' : '') + '>SI</option><option ' + (p.activo === 'NO' ? 'selected' : '') + '>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>').join('') +
+  h += '<div class="card"><h4 style="margin-bottom:4px">Equipo y horas</h4><p class="sub" style="margin-bottom:8px">Horas de trabajo por día: de lunes a viernes y el sábado (hasta el mediodía). Roles separados por coma: guion, grabacion, edicion, calidad, trafico. Si cambias el nombre de alguien, sus tareas se actualizan solas.</p><div class="scroll"><table class="tbl" id="t-eq"><thead><tr><th>Nombre</th><th>Roles</th><th>Horas L–V</th><th>Horas sáb</th><th>Semana</th><th>Ausencias</th><th>País (feriados)</th><th>Activo</th><th></th></tr></thead><tbody>' +
+    S.equipo.map(p => '<tr data-id="' + esc(p.id) + '"><td><input data-f="nombre" value="' + esc(p.nombre) + '" style="width:130px"></td><td><input data-f="roles" value="' + esc(p.roles) + '" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="' + esc(p.horasDia === '' || p.horasDia == null ? 8 : p.horasDia) + '" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="' + esc(p.horasSab === '' || p.horasSab == null ? 4 : p.horasSab) + '" style="width:70px"></td><td><span class="sub">' + capSemNom(p) + ' h</span></td><td><input data-f="ausencias" value="' + esc(p.ausencias || '') + '" placeholder="2026-12-20/2027-01-03" style="width:190px"></td><td><select data-f="pais"><option value="PE" ' + (p.pais === 'CO' ? '' : 'selected') + '>Perú</option><option value="CO" ' + (p.pais === 'CO' ? 'selected' : '') + '>Colombia</option></select></td><td><select data-f="activo"><option ' + (p.activo !== 'NO' ? 'selected' : '') + '>SI</option><option ' + (p.activo === 'NO' ? 'selected' : '') + '>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>').join('') +
     '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="eq-add"><i class="ti ti-plus"></i>Agregar persona</button><button class="btn sm p" data-act="eq-save"><i class="ti ti-device-floppy"></i>Guardar equipo</button></div></div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Días para aprobar guiones y contenido</label><input id="cfg-aprob" type="number" min="1" value="' + diasAprob() + '" style="width:110px"></div><div><label class="l">Días de grabación</label><input id="cfg-grab" type="number" min="1" value="' + diasGrab() + '" style="width:110px"></div><div><label class="l">Rondas de cambios incluidas</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div><div><label class="l">Planificar hasta (% de las horas)</label><input id="cfg-umbral" type="number" min="50" max="100" value="' + Math.round(umbral() * 100) + '" style="width:110px"></div><div><label class="l">Colchón de entrega (días laborables)</label><input id="cfg-colchon" type="number" min="0" value="' + colchon() + '" style="width:110px"></div><div><label class="l">Días sin respuesta para dar por aprobado</label><input id="cfg-tacita" type="number" min="1" value="' + num(S.config.diasTacita, 5) + '" style="width:110px"></div><div><label class="l">Planificar desde (mes)</label><input id="cfg-desde" type="month" value="' + esc(desdeMes()) + '" style="width:160px"></div><div><label class="l">Tope de entrega (día del mes siguiente)</label><input id="cfg-tope" type="number" min="1" max="28" value="' + topeDia() + '" style="width:110px"></div><div><label class="l">Reserva final (días laborables)</label><input id="cfg-reserva" type="number" min="0" value="' + reservaDias() + '" style="width:110px"></div></div><p class="sub" style="margin-top:4px">Colchón: el equipo apunta a terminar esos días antes de la fecha que se le promete al cliente. Tope: todo el contenido debe estar listo ese día (1 = el 1 de cada mes; si no es laborable, el último día laborable anterior). Reserva: días laborables que quedan libres antes del tope para absorber atrasos.</p><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><label class="l">Feriados (MM-DD se repite cada año; AAAA-MM-DD es solo ese día)</label><input id="cfg-fer" value="' + esc(S.config.feriados || '') + '" style="width:100%"><p class="sub" style="margin-top:4px">Revisa esta lista: incluye los feriados nacionales de fecha fija; agrega los que cambian cada año (Semana Santa, feriados puente).</p><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Días para aprobar guiones y contenido</label><input id="cfg-aprob" type="number" min="1" value="' + diasAprob() + '" style="width:110px"></div><div><label class="l">Días de grabación</label><input id="cfg-grab" type="number" min="1" value="' + diasGrab() + '" style="width:110px"></div><div><label class="l">Ajustes de copy incluidos por guion</label><input id="cfg-copy" type="number" min="0" value="' + rondasCopy() + '" style="width:110px"></div><div><label class="l">Cambios de edición incluidos por video</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div><div><label class="l">Planificar hasta (% de las horas)</label><input id="cfg-umbral" type="number" min="50" max="100" value="' + Math.round(umbral() * 100) + '" style="width:110px"></div><div><label class="l">Colchón de entrega (días laborables)</label><input id="cfg-colchon" type="number" min="0" value="' + colchon() + '" style="width:110px"></div><div><label class="l">Días sin respuesta para dar por aprobado</label><input id="cfg-tacita" type="number" min="1" value="' + num(S.config.diasTacita, 5) + '" style="width:110px"></div><div><label class="l">Días de investigación (tras el onboarding)</label><input id="cfg-invdias" type="number" min="0" value="' + diasInv() + '" style="width:110px"></div><div><label class="l">Cliente típico (piezas)</label><input id="cfg-tipico" type="number" min="1" value="' + clienteTipico() + '" style="width:110px"></div><div><label class="l">Onboarding CON tráfico (activos de pauta; 2 h cada una, en paralelo)</label><div class="check-grid" id="cfg-onbt">' + S.equipo.filter(p => p.activo !== 'NO').map(p => '<label><input type="checkbox" value="' + esc(p.id) + '" ' + (onboardingTrafico().split('+').indexOf(p.id) >= 0 ? 'checked' : '') + '> ' + esc(p.nombre) + '</label>').join('') + '</div></div><div><label class="l">Onboarding SIN tráfico (2 h cada una, en paralelo)</label><div class="check-grid" id="cfg-onb">' + S.equipo.filter(p => p.activo !== 'NO').map(p => '<label><input type="checkbox" value="' + esc(p.id) + '" ' + (onboardingPor().split('+').indexOf(p.id) >= 0 ? 'checked' : '') + '> ' + esc(p.nombre) + '</label>').join('') + '</div></div><div><label class="l">Planificar desde (mes)</label><input id="cfg-desde" type="month" value="' + esc(desdeMes()) + '" style="width:160px"></div><div><label class="l">Tope de entrega (día del mes siguiente)</label><input id="cfg-tope" type="number" min="1" max="28" value="' + topeDia() + '" style="width:110px"></div><div><label class="l">Reserva final (días laborables)</label><input id="cfg-reserva" type="number" min="0" value="' + reservaDias() + '" style="width:110px"></div></div><p class="sub" style="margin-top:4px">Colchón: el equipo apunta a terminar esos días antes de la fecha que se le promete al cliente. Tope: todo el contenido debe estar listo ese día (1 = el 1 de cada mes; si no es laborable, el último día laborable anterior). Reserva: días laborables que quedan libres antes del tope para absorber atrasos.</p><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><label class="l">Feriados (MM-DD se repite cada año; AAAA-MM-DD es solo ese día)</label><input id="cfg-fer" value="' + esc(S.config.feriados || '') + '" style="width:100%"><p class="sub" style="margin-top:4px">Esta lista es la de Perú: incluye los feriados nacionales de fecha fija; Semana Santa se calcula sola. Agrega los feriados puente.</p><label class="l">Feriados extra de Colombia (AAAA-MM-DD; los de ley ya se calculan solos)</label><input id="cfg-ferco" value="' + esc(S.config.feriadosCO || '') + '" style="width:100%"><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Etapas de cada lote</h4><p class="sub" style="margin-bottom:8px">Las fechas se calculan <b>hacia atrás</b> desde la entrega fija del cliente. <b>Por pieza</b>: una tarea por video, repartidas según lo que rinde la persona cada día. <b>Una por lote</b>: una sola tarea. <b>Ancla</b>: de qué fecha cuelga. <b>± días</b>: días laborables antes (−) o después (+) de esa fecha. <b>Horas</b>: lo que toma cada tarea. <b>Requiere / Excluye</b>: la etapa solo existe si el cliente incluye (o no) ese servicio. <b>Calendario</b>: se publica en Google Calendar. <b>Guía</b>: pasos de «cómo se hace», separados por |.</p><div class="scroll"><table class="tbl" id="t-et"><thead><tr><th>Etapa</th><th>Rol</th><th>Alcance</th><th>Ancla</th><th>± días</th><th>Horas</th><th>Requiere</th><th>Excluye</th><th>Calendario</th><th>Guía</th><th></th></tr></thead><tbody>' + S.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0)).map(filaEtapa).join('') + '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="et-add"><i class="ti ti-plus"></i>Agregar etapa</button><button class="btn sm p" data-act="et-save"><i class="ti ti-device-floppy"></i>Guardar etapas</button></div><p class="sub" style="margin-top:8px">Cambiar etapas no modifica lotes ya creados; aplica a los que generes después.</p></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Manuales</h4><p class="sub" style="margin-bottom:8px">Enlaces a sus documentos del Drive. El primero aparece como botón arriba.</p>' + [['cfg-u-manual', 'manualUrl', 'Manual de procesos y sistemas'], ['cfg-u-turnos', 'turnosUrl', 'Sistema de turnos de producción (referencia anterior)'], ['cfg-u-politica', 'politicaUrl', 'Política de revisiones y aprobaciones'], ['cfg-u-calidad', 'calidadUrl', 'Checklist de control de calidad']].map(u => '<label class="l">' + u[2] + '</label><input id="' + u[0] + '" value="' + esc(S.config[u[1]] || '') + '" style="width:100%">').join('') + '<div style="margin-top:10px"><button class="btn sm p" data-act="urls-save"><i class="ti ti-device-floppy"></i>Guardar enlaces</button></div></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Google Calendar</h4><p class="sub" style="margin-bottom:8px">Publica en el calendario de Sinergia las etapas con Calendario = SI (por defecto: envío de guiones, grabación o material, entrega y campañas) como eventos de todo el día con el prefijo «Prod ·». Si cambian fechas o responsables, vuelve a sincronizar.</p><button class="btn sm p" data-act="cal-sync"><i class="ti ti-calendar-event"></i>Sincronizar con Google Calendar</button></div>';
   h += htmlFeriados();
+  h += htmlFeriadosCO();
   const inac = {}; lotes(S.tareas).forEach(l => { if (activos().some(c => c.id === l.clienteId)) return; const k = l.tareas.filter(t => t.estado !== 'Listo').length; if (k) { inac[l.clienteId] = inac[l.clienteId] || { nombre: l.cliente, n: 0 }; inac[l.clienteId].n += k; } });
   if (Object.keys(inac).length) h += '<div class="card"><h4 style="margin-bottom:4px">Clientes que ya no están activos</h4><p class="sub" style="margin-bottom:8px">Pasaron a Pausado o Terminado en el CRM pero siguen teniendo tareas pendientes que ocupan capacidad. Borra solo lo pendiente; lo ya hecho se conserva.</p>' + Object.keys(inac).map(k => '<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0"><span><b>' + esc(inac[k].nombre) + '</b> · ' + inac[k].n + ' tareas pendientes</span><button class="btn sm d" data-act="borrar-inactivo" data-id="' + esc(k) + '"><i class="ti ti-trash"></i>Borrar pendientes</button></div>').join('') + '</div>';
   const legacy = S.tareas.filter(t => t.plan !== 'v4').length;
@@ -1295,7 +1379,7 @@ async function guardar(accion, d, ok) {
   try { const r = await api(accion, { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); if (ok) alert(ok); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
 }
-const guardarEquipo = () => guardar('saveEquipo', leerTabla('t-eq').filter(o => (o.nombre || '').trim()).map(o => { const d = num(o.horasDia, 8), s = num(o.horasSab, 4); return { id: o.id || slug(o.nombre), nombre: o.nombre.trim(), roles: (o.roles || '').trim(), capacidad: '', activo: o.activo || 'SI', horasSemana: String(5 * d + s), horasDia: String(d), horasSab: String(s), ausencias: (o.ausencias || '').trim() }; }));
+const guardarEquipo = () => guardar('saveEquipo', leerTabla('t-eq').filter(o => (o.nombre || '').trim()).map(o => { const d = num(o.horasDia, 8), s = num(o.horasSab, 4); return { id: o.id || slug(o.nombre), nombre: o.nombre.trim(), roles: (o.roles || '').trim(), capacidad: '', activo: o.activo || 'SI', horasSemana: String(5 * d + s), horasDia: String(d), horasSab: String(s), ausencias: (o.ausencias || '').trim(), pais: o.pais === 'CO' ? 'CO' : 'PE' }; }));
 // Una etapa por vez (las guías largas no caben todas juntas en una dirección web); al final se quitan las que ya no están
 async function guardarEtapas() {
   const filas = leerTabla('t-et').filter(o => (o.nombre || '').trim()); let mx = Math.max(0, ...filas.map(o => parseInt(o.orden) || 0)); const usadas = {};
@@ -1308,7 +1392,7 @@ async function guardarEtapas() {
   } catch (e) { alert('Error al guardar las etapas: ' + e.message + '\nLo que ya se guardó se conserva; vuelve a intentarlo.'); try { await cargar(); render(); } catch (e2) {} }
   loading(false);
 }
-const guardarReglas = () => guardar('saveConfig', { pares: { diasAprob: String(Math.max(1, parseInt($('cfg-aprob').value) || 2)), diasGrab: String(Math.max(1, parseInt($('cfg-grab').value) || 2)), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), umbralCarga: String(Math.min(100, Math.max(50, parseInt($('cfg-umbral').value) || 85))), colchon: String(Math.max(0, parseInt($('cfg-colchon').value) || 0)), desdeMes: ($('cfg-desde').value || ''), topeDia: String(Math.min(28, Math.max(1, parseInt($('cfg-tope').value) || 1))), reserva: String(Math.max(0, parseInt($('cfg-reserva').value) || 0)), diasTacita: String(Math.max(1, parseInt($('cfg-tacita').value) || 5)), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|'), feriados: $('cfg-fer').value.split(',').map(s => s.trim()).filter(Boolean).join(',') } });
+const guardarReglas = () => guardar('saveConfig', { pares: { diasAprob: String(Math.max(1, parseInt($('cfg-aprob').value) || 2)), diasGrab: String(Math.max(1, parseInt($('cfg-grab').value) || 2)), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), rondasCopy: String(Math.max(0, parseInt($('cfg-copy').value) || 0)), umbralCarga: String(Math.min(100, Math.max(50, parseInt($('cfg-umbral').value) || 85))), colchon: String(Math.max(0, parseInt($('cfg-colchon').value) || 0)), desdeMes: ($('cfg-desde').value || ''), diasInvestigacion: String(Math.max(0, parseInt($('cfg-invdias').value) || 0)), clienteTipico: String(Math.max(1, parseInt($('cfg-tipico').value) || 20)), onboardingPor: Array.from(document.querySelectorAll('#cfg-onb input:checked')).map(i => i.value).join('+'), onboardingTrafico: Array.from(document.querySelectorAll('#cfg-onbt input:checked')).map(i => i.value).join('+'), topeDia: String(Math.min(28, Math.max(1, parseInt($('cfg-tope').value) || 1))), reserva: String(Math.max(0, parseInt($('cfg-reserva').value) || 0)), diasTacita: String(Math.max(1, parseInt($('cfg-tacita').value) || 5)), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|'), feriados: $('cfg-fer').value.split(',').map(s => s.trim()).filter(Boolean).join(','), feriadosCO: $('cfg-ferco').value.split(',').map(s => s.trim()).filter(Boolean).join(',') } });
 const guardarUrls = () => guardar('saveConfig', { pares: { manualUrl: $('cfg-u-manual').value.trim(), turnosUrl: $('cfg-u-turnos').value.trim(), politicaUrl: $('cfg-u-politica').value.trim(), calidadUrl: $('cfg-u-calidad').value.trim() } });
 async function borrarInactivo(id) {
   if (!confirm('¿Borrar las tareas pendientes de este cliente? Lo ya hecho se conserva.')) return;
@@ -1368,7 +1452,7 @@ function abrirGuia() {
     '<h4>Las 3 fechas del cliente</h4><p>Cuándo recibe los guiones, cuándo debe entregar el material grabado y cuándo recibe su contenido editado. La aprobación y las reglas (48 horas, un cambio por video, si el material llega tarde la entrega se mueve) van por escrito, no como fechas.</p>' +
     '<h4>El tope: «todo listo el 1»</h4><p>Se configura en Ajustes. Si el 1 cae domingo o feriado, el tope pasa al último día laborable anterior (ejemplo: el 1 de noviembre de 2026 es domingo y feriado: el tope es el sábado 31 de octubre). Antes del tope queda una <b>reserva</b> de días libres para atrasos.</p>' +
     '<h4>Casos especiales</h4><ul><li><b>Cliente nuevo</b>: en «Fechas y reglas», pon su <b>primera entrega</b>.</li><li><b>Cliente que no renueva</b>: pon su <b>última entrega</b>. Se libera su capacidad y su último lote lleva el cierre ordenado.</li><li><b>Quién graba</b>: se elige por cliente (hoy solo Elle la graba Sinergia).</li><li><b>Segundo editor o guionista</b>: asígnalo por cliente en «Quién hace qué».</li><li><b>Vacaciones</b>: Ajustes → Equipo → Ausencias.</li><li><b>Pedido extra</b>: botón «Lote extra».</li><li><b>Cliente que se atrasa</b>: «Retraso del cliente» mueve solo su lote.</li><li><b>Cliente pausado o terminado en el CRM</b>: Ajustes → «Clientes que ya no están activos».</li></ul>' +
-    '<h4>Capacidad</h4><p>La edición y la calidad solo cuentan el <b>tramo</b> del ciclo en que de verdad trabajan (desde que llega el primer material hasta el tope menos la reserva), no todo el mes. Por eso «piezas más que caben» es menor que antes.</p></div><div class="btns"><button class="btn p" data-act="cerrar">Entendido</button></div>');
+    '<h4>Capacidad</h4><p>La edición y la calidad solo cuentan el <b>tramo</b> del ciclo en que de verdad trabajan (desde que llega el primer material hasta el tope menos la reserva), no todo el mes. Por eso «piezas más que caben» es menor que antes.</p><h4>Cuándo contratar</h4><p>En el Dashboard, «Capacidad y contratación» mira los próximos 3 ciclos: en amarillo conviene ir armando la búsqueda; en rojo ya no cabe un cliente típico o alguien pasa del 85%.</p><h4>Cliente nuevo</h4><p>La sesión de onboarding (2 h de Alejandra y Evonny) es una tarea del primer lote. Pon la <b>fecha del onboarding</b> en «Fechas y reglas»: desde ahí corre la investigación y se calcula su primera entrega.</p></div><div class="btns"><button class="btn p" data-act="cerrar">Entendido</button></div>');
 }
 // ═════════ TAREA: EDITAR ═════════
 function openModal(html) { $('modal').innerHTML = html; $('overlay').classList.add('open'); }
@@ -1428,6 +1512,7 @@ async function accionPieza(act, cid, ciclo, pz) {
     if (items.length && hechos < items.length && !confirm('El checklist está incompleto (' + hechos + ' de ' + items.length + '). ¿Aprobar de todos modos?')) return;
   }
   if (act === 'pz-qacambios') { motivo = prompt('¿Qué hay que corregir antes de enviarla al cliente?'); if (motivo === null) return; motivo = motivo.trim() || 'sin detalle'; }
+  if (act === 'pz-copycambios') { motivo = prompt('¿Qué ajuste de copy pidió el cliente?'); if (motivo === null) return; motivo = motivo.trim() || 'sin detalle'; }
   if (act === 'pz-clicambios') { motivo = prompt('¿Qué cambio pidió el cliente?'); if (motivo === null) return; motivo = motivo.trim() || 'sin detalle'; }
   let extra = false;
   await conSync(async () => {
@@ -1438,6 +1523,12 @@ async function accionPieza(act, cid, ciclo, pz) {
       const txt = 'Calidad: ' + motivo;
       await patchTarea(p.calidad.id, { estado: 'Con cambios', checklist: '', notas: nota(p.calidad, txt) });
       if (p.edicion) await patchTarea(p.edicion.id, { estado: 'Con cambios', notas: nota(p.edicion, txt) });
+    } else if (act === 'pz-copycambios') {
+      const g = p.guion, ronda = (parseInt(g.rondas) || 0) + 1;
+      await patchTarea(g.id, { estado: 'Con cambios', rondas: ronda, notas: nota(g, 'Ajuste de copy ' + ronda + ' (cliente): ' + motivo) });
+      if (ronda > rondasCopy() && confirm('Este ajuste supera los ' + rondasCopy() + ' ajuste(s) de copy incluidos en el plan. Según la política se cotiza como extra. ¿Lo registro como pedido fuera del plan?')) {
+        extra = await guardarExtra('Guion ' + pz + ' (' + g.cliente + '): ajuste de copy ' + ronda + '. ' + motivo, 'Extra cotizado', cid);
+      }
     } else if (act === 'pz-cliok') await patchTarea(p.revvideo.id, { estado: 'Listo' });
     else if (act === 'pz-clicambios') {
       const rv = p.revvideo, ronda = (parseInt(rv.rondas) || 0) + 1, txt = 'Ronda ' + ronda + ' (cliente): ' + motivo;
@@ -1530,7 +1621,7 @@ document.addEventListener('click', e => {
   else if (a === 'extra') abrirExtra(id);
   else if (a === 'extra-ok') { const c = ctxCli, ds = $('x-desc').value, tp = $('x-tipo').value; loading(true, 'Guardando…'); guardarExtra(ds, tp, c).then(async ok => { if (ok) { closeModal(); await cargar(); render(); } }).catch(err => alert('Error: ' + err.message)).finally(() => loading(false)); }
   else if (a === 'sim') calcSim();
-  else if (a === 'eq-add') document.querySelector('#t-eq tbody').insertAdjacentHTML('beforeend', '<tr><td><input data-f="nombre" style="width:130px"></td><td><input data-f="roles" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="8" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="4" style="width:70px"></td><td></td><td><input data-f="ausencias" style="width:190px" placeholder="2026-12-20/2027-01-03"></td><td><select data-f="activo"><option>SI</option><option>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>');
+  else if (a === 'eq-add') document.querySelector('#t-eq tbody').insertAdjacentHTML('beforeend', '<tr><td><input data-f="nombre" style="width:130px"></td><td><input data-f="roles" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="8" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="4" style="width:70px"></td><td></td><td><input data-f="ausencias" style="width:190px" placeholder="2026-12-20/2027-01-03"></td><td><select data-f="pais"><option value="PE">Perú</option><option value="CO">Colombia</option></select></td><td><select data-f="activo"><option>SI</option><option>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>');
   else if (a === 'eq-del' || a === 'et-del') el.closest('tr').remove();
   else if (a === 'eq-save') guardarEquipo();
   else if (a === 'et-add') document.querySelector('#t-et tbody').insertAdjacentHTML('beforeend', filaEtapa({ key: '', nombre: '', rol: '', alcance: 'lote', ancla: 'entrega', offsetDias: '0', horas: '0', requiere: '', excluye: '', calendario: 'NO', guia: '', orden: '' }));
@@ -1548,7 +1639,7 @@ document.addEventListener('change', e => {
   else if (f === 'yo') { YO = t.value; lsSet('prod_yo', YO); render(); }
   else if (t.dataset && t.dataset.chk) toggleChk(t.dataset.chk);
   else if (t.id === 'g-inv' || t.id === 'g-pas') prevGen();
-  else if (t.id === 'f-dgui' || t.id === 'f-dmat' || t.id === 'f-entregas') evalFechasUI();
+  else if (t.id === 'f-dgui' || t.id === 'f-dmat' || t.id === 'f-entregas' || t.id === 'f-onb' || (t.closest && t.closest('#f-asig-onboarding'))) evalFechasUI();
   else if (t.id === 'le-piezas' || t.id === 'le-fecha' || (t.closest && t.closest('#le-incl'))) prevLoteExtra();
 });
 $('overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
