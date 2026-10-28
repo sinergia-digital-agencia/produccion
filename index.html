@@ -241,9 +241,15 @@ function planFechas(o) {
   if (o.edicion) {
     r.qa = bloque(o.hCalidad, o.pCalidad, E, fer, o.ocup);
     r.ed = bloque(o.hEdicion, o.pEdicion, addLab(E, -1, fer), fer, o.ocup);
-    r.material = addLab(r.ed.ini, -1, fer);
+    // Fechas fijas del cliente (o.fijas = {envio, material}): mandan sobre el cálculo hacia atrás
+    r.material = o.fijas && o.fijas.material ? prevLab(o.fijas.material, fer) : addLab(r.ed.ini, -1, fer);
+    if (r.ed.ini <= r.material) (r.avisos = r.avisos || []).push('edicion');   // no hay días suficientes entre el material y la entrega
     r.grab = [addLab(r.material, -(dG - 1), fer), r.material];
-    if (o.guion) { const A = addLab(r.grab[0], -1, fer); r.aprueba = [addLab(A, -(dA - 1), fer), A]; r.envio = addLab(r.aprueba[0], -1, fer); }
+    if (o.guion) {
+      const A = addLab(r.grab[0], -1, fer);
+      if (o.fijas && o.fijas.envio) { r.envio = prevLab(o.fijas.envio, fer); r.aprueba = [addLab(r.envio, 1, fer), A]; if (r.aprueba[0] > A) { r.aprueba = [A, A]; (r.avisos = r.avisos || []).push('aprobacion'); } }
+      else { r.aprueba = [addLab(A, -(dA - 1), fer), A]; r.envio = addLab(r.aprueba[0], -1, fer); }
+    }
     r.revision = [addLab(E, 1, fer), addLab(E, dA, fer)];
   } else if (o.guion) {
     r.envio = E; r.aprueba = [addLab(E, 1, fer), addLab(E, dA, fer)];
@@ -273,7 +279,7 @@ function construirPlan(o) {
   const hpp = a => etapas.filter(e => esPieza(e) && e.ancla === a).reduce((s, e) => s + num(e.horas, 0), 0);
   const bh = a => hpp(a) * (a === 'escritura' ? n - co : n);
   const plan = (n < 1 || !o.entrega) ? null : planFechas({ entrega: o.entrega, fer, diasAprob: num(o.diasAprob, 2), diasGrab: num(o.diasGrab, 2), guion: etapas.some(e => esPieza(e) && e.ancla === 'escritura'), edicion: etapas.some(e => esPieza(e) && e.ancla === 'edicion'),
-    hEscritura: bh('escritura'), hEdicion: bh('edicion'), hCalidad: bh('calidad'), pEscritura: bp('escritura'), pEdicion: bp('edicion'), pCalidad: bp('calidad'), inv: o.investigacion, ocup: o.ocup, hEscritura2: co * hpp('escritura'), pEscritura2: p2 });
+    hEscritura: bh('escritura'), hEdicion: bh('edicion'), hCalidad: bh('calidad'), pEscritura: bp('escritura'), pEdicion: bp('edicion'), pCalidad: bp('calidad'), inv: o.investigacion, ocup: o.ocup, fijas: o.fijas, hEscritura2: co * hpp('escritura'), pEscritura2: p2 });
   return { n, off, etapas, plan, fer, co, p2 };
 }
 // o: {entrega, tanda, tandas, piezas, incluye[], etapas[], equipo[], fer[], diasAprob, diasGrab, investigacion}
@@ -555,7 +561,7 @@ const cronoDe = id => {
   const r = S.cronograma.find(x => x.clienteId === id) || {};
   const entregas = String(r.entregas || '').split(',').map(s => parseInt(s)).filter(n => n >= 1 && n <= 31);
   const dA = parseInt(r.diasAprob), dG = parseInt(r.diasGrab);
-  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: parseInt(r.coautorPiezas) || 0, diasAprob: dA >= 1 ? dA : null, diasGrab: dG >= 1 ? dG : null, primera: r.primeraEntrega || '', ultima: r.ultimaEntrega || '', asig: asigMap(r.asignaciones), graba: r.graba === 'cliente' || r.graba === 'sinergia' ? r.graba : '', prio: parseInt(r.prioridad) > 0 ? parseInt(r.prioridad) : null };
+  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: parseInt(r.coautorPiezas) || 0, diasAprob: dA >= 1 ? dA : null, diasGrab: dG >= 1 ? dG : null, primera: r.primeraEntrega || '', ultima: r.ultimaEntrega || '', asig: asigMap(r.asignaciones), dGuiones: parseInt(r.diaGuiones) >= 1 ? parseInt(r.diaGuiones) : null, dMaterial: parseInt(r.diaMaterial) >= 1 ? parseInt(r.diaMaterial) : null, graba: r.graba === 'cliente' || r.graba === 'sinergia' ? r.graba : '', prio: parseInt(r.prioridad) > 0 ? parseInt(r.prioridad) : null };
 };
 // Servicios que de verdad hacemos: la grabación sale de «Quién graba» de la ficha del cliente (si está vacío, lo que diga el CRM)
 const incluyeDe = c => { const cr = cronoDe(c.id), base = c.incluye || [], sin = base.filter(k => k !== 'grabacion'); return (cr.graba === 'sinergia' || (cr.graba !== 'cliente' && base.indexOf('grabacion') >= 0)) ? sin.concat(['grabacion']) : sin; };
@@ -569,17 +575,28 @@ const ventanaDe = ym => ventanaCiclo(topeDe(mesAdd(ym, -1)), topeDe(ym), reserva
 const colchon = () => { const v = parseInt(S.config.colchon); return isNaN(v) ? 1 : Math.max(0, v); };
 const promesa = (c, ym, j) => { const cr = cronoDe(c.id); return cr.entregas[j - 1] ? entregaDelMes(ym, cr.entregas[j - 1]) : ''; };
 // Un lote existe solo entre la primera y la última entrega del cliente (si las tiene)
-function loteValido(c, ym, j) { const cr = cronoDe(c.id), e = promesa(c, ym, j); return !!e && (!cr.primera || e >= cr.primera) && (!cr.ultima || e <= cr.ultima); }
+// Desde qué mes se planifica (los meses anteriores quedan fuera: no se generan ni se cuentan)
+const desdeMes = () => /^\d{4}-\d{2}$/.test(S.config.desdeMes || '') ? S.config.desdeMes : '';
+const mesInicial = () => { const hm = S.hoy.slice(0, 7); return desdeMes() && hm < desdeMes() ? desdeMes() : hm; };
+function loteValido(c, ym, j) { if (desdeMes() && ym < desdeMes()) return false; const cr = cronoDe(c.id), e = promesa(c, ym, j); return !!e && (!cr.primera || e >= cr.primera) && (!cr.ultima || e <= cr.ultima); }
 // El último lote de un cliente que no renueva lleva el cierre ordenado
 function esCierre(c, ym, j) { const cr = cronoDe(c.id); if (!cr.ultima || !cr.entregas.length || j !== cr.entregas.length || !loteValido(c, ym, j)) return false; return promesa(c, mesAdd(ym, 1), 1) > cr.ultima; }
 // Hasta cuándo tienen registrado el servicio en el CRM (fin de su último ciclo)
-const servicioHasta = c => (c.ciclos || []).map(x => x.fin).filter(Boolean).sort().pop() || '';
-const tentativo = (c, e) => { const cr = cronoDe(c.id), sh = servicioHasta(c); return !cr.ultima && !!sh && !!e && e > sh; };
+// Las fechas de pago y de ciclos del CRM NO se usan: del CRM solo entran clientes activos, piezas y servicios.
+// (Quedan neutras para no tocar el resto del código.)
+const servicioHasta = () => '';
+const tentativo = () => false;
 const habilesEntre = (a, b) => { let n = 0, g = a; while (g < b && n < 400) { g = addDays(g, 1); if (esLab(g, FER())) n++; } return n; };
 const tandasCli = c => Math.max(1, cronoDe(c.id).entregas.length);
+// Fechas fijas del cliente en un mes: guiones y material (solo si están las tres y en orden)
+function fijasDe(c, ym, prom) {
+  const cr = cronoDe(c.id); if (!cr.dGuiones || !cr.dMaterial || !prom || cr.entregas.length !== 1) return null;
+  const s = entregaDelMes(ym, cr.dGuiones), m = entregaDelMes(ym, cr.dMaterial);
+  return (s < m && m < prom) ? { envio: s, material: m } : null;
+}
 function paramsPromesa(c, ym, j, prom, inv) {
   const cr = cronoDe(c.id), fer = FER();
-  return { entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: cr.asig, cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
+  return { fijas: fijasDe(c, ym, prom), entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: cr.asig, cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
 }
 function paramsLote(c, loteId, inv) { const ym = loteId.slice(0, 7), j = +loteId.split('-')[2]; return paramsPromesa(c, ym, j, promesa(c, ym, j), inv); }
 // Lo que ya tienen comprometido (tareas pendientes de los demás lotes): el lote nuevo se acomoda en los huecos
@@ -595,7 +612,6 @@ function datosLote(c, loteId) {
   return { entrega: ent, wr: mm('guion'), ed: mm('edicion'), envio: L.envioguion ? L.envioguion.fecha : null, material: mat ? mat.fecha : null, aprueba: ap ? [addLab(ap, -(diasAprob() - 1), fer), ap] : null, grab: mat ? [addLab(mat.fecha, -(diasGrab() - 1), fer), mat.fecha] : null, revision: ent && rv ? [addLab(ent, 1, fer), rv.fin] : null };
 }
 // Lotes que todavía no se generaron: se proyectan para ver la carga que ya tienen comprometida.
-// opts.soloConfirmados: deja fuera los lotes de clientes con renovación pendiente.
 function proyeccion(ymIni, ymFin, opts) {
   // en orden de entrega, cada lote se acomoda alrededor de lo real y de los lotes proyectados antes que él
   const ls = lotes(S.tareas), cand = [], out = [];
@@ -603,7 +619,7 @@ function proyeccion(ymIni, ymFin, opts) {
     const cr = cronoDe(c.id); if (!cr.entregas.length || !c.piezas) return;
     for (let m = ymIni; m <= ymFin; m = mesAdd(m, 1)) for (let j = 1; j <= cr.entregas.length; j++) {
       const id = m + '-' + j; if (ls.some(l => l.clienteId === c.id && l.ciclo === id)) continue;
-      if (!loteValido(c, m, j) || (opts && opts.soloConfirmados && tentativo(c, promesa(c, m, j)))) continue;
+      if (!loteValido(c, m, j)) continue;
       cand.push({ c, id, e: paramsLote(c, id, false).entrega });
     }
   });
@@ -641,7 +657,7 @@ function mensajeConFechas(c, f, ym) {
 }
 const mensajeCliente = (c, loteId) => mensajeConFechas(c, fechas3(c, loteId), loteId.slice(0, 7));
 // Fila completa del cronograma de un cliente (para guardar sin perder lo que ya tenía)
-const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { clienteId: id, entregas: r.entregas || '', aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: r.coautorPiezas || '', diasAprob: r.diasAprob || '', diasGrab: r.diasGrab || '', primeraEntrega: r.primeraEntrega || '', ultimaEntrega: r.ultimaEntrega || '', asignaciones: r.asignaciones || '', graba: r.graba || '', prioridad: r.prioridad || '' }; };
+const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { clienteId: id, entregas: r.entregas || '', aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: r.coautorPiezas || '', diasAprob: r.diasAprob || '', diasGrab: r.diasGrab || '', primeraEntrega: r.primeraEntrega || '', ultimaEntrega: r.ultimaEntrega || '', asignaciones: r.asignaciones || '', graba: r.graba || '', prioridad: r.prioridad || '', diaGuiones: r.diaGuiones || '', diaMaterial: r.diaMaterial || '' }; };
 // Plan del mes: propone la entrega de cada cliente para que Juan Pablo edite en fila y todo quede listo antes del tope
 function planDelMes(ym) {
   const fer = FER(), tope = topeDe(ym), ls = lotes(S.tareas), excl = new Set(), items = [], fuera = [], clis = [];
@@ -652,12 +668,26 @@ function planDelMes(ym) {
     if ((cr.primera && tope < cr.primera) || (cr.ultima && cr.ultima < ym + '-01')) { fuera.push(c); return; }
     excl.add(c.id + '|' + ym + '-1');
     const edH = S.etapas.filter(e => esPieza(e) && e.ancla === 'edicion' && cumpleEt(e, inc)).reduce((a, e) => a + num(e.horas, 0), 0) * c.piezas, primero = !ls.some(l => l.clienteId === c.id);
-    clis.push(c); items.push({ id: c.id, edH, prio: cr.prio, c, mk: E => Object.assign(paramsPromesa(c, ym, 1, E, primero), { tanda: 1, tandas: 1 }) });
+    clis.push(c); items.push({ id: c.id, edH, prio: cr.prio, c, mk: E => Object.assign(paramsPromesa(c, ym, 1, E, primero), { tanda: 1, tandas: 1, fijas: null }) });
   });
   const ocup = cargaDiaria(S.tareas.filter(t => !excl.has(t.clienteId + '|' + t.ciclo)), S.equipo, '0000-00-00', '9999-99-99', true);
   const plan = planificarCiclo(items, tope, reservaDias(), fer, ocup);
   const cap = capacidadMes(ym, clis.map(c => { const cr = cronoDe(c.id), p2 = S.equipo.find(x => x.id === cr.coautor); return { piezas: c.piezas, tandas: 1, incluye: incluyeDe(c), asig: cr.asig, coautor: p2 && cr.coautorPiezas ? { nombre: p2.nombre, piezas: cr.coautorPiezas } : null }; }), S.etapas, S.equipo, fer, umbral(), ventanaDe(ym));
   return { ym, tope, plan, fuera, cap, ventana: ventanaDe(ym) };
+}
+// ¿Alcanzan las 3 fechas que se pusieron? Compara con lo mínimo que necesita el sistema (días hábiles de cada tramo)
+function evaluarFechas(c, ym, dG, dM, dE) {
+  const E = entregaDelMes(ym, dE), excl = c.id + '|' + ym + '-1';
+  const ocup = cargaDiaria(S.tareas.filter(t => t.clienteId + '|' + t.ciclo !== excl), S.equipo, '0000-00-00', '9999-99-99', true);
+  const nat = construirPlan(Object.assign(paramsPromesa(c, ym, 1, E, false), { tanda: 1, tandas: 1, fijas: null, ocup })).plan;
+  const inc = incluyeDe(c), ed = inc.includes('edicion'), g = inc.includes('guion');
+  const r = { E, nat, ed, g, S: dG ? entregaDelMes(ym, dG) : null, M: dM ? entregaDelMes(ym, dM) : null };
+  r.orden = !(r.S && r.M) || (r.S < r.M && r.M < E);
+  if (nat) {
+    r.necCliente = g && ed ? habilesEntre(nat.envio, nat.material) : 0; r.necEquipo = ed ? habilesEntre(nat.material, E) : 0;
+    r.cliente = r.S && r.M ? habilesEntre(r.S, r.M) : null; r.equipo = r.M ? habilesEntre(r.M, E) : null;
+  }
+  return r;
 }
 let mesPlan = null, planActual = null;
 function planYmInicial() { const hm = S.hoy.slice(0, 7); for (let k = 0; k < 4; k++) { const ym = mesAdd(hm, k), p = planDelMes(ym); if (p.plan.every(x => !x.desde || x.desde >= S.hoy)) return ym; } return mesAdd(hm, 1); }
@@ -718,7 +748,7 @@ async function entrar(c) {
     lsSet('prod_code', c);
     $('login').hidden = true; $('app').hidden = false;
     $('hoy-label').textContent = corta(S.hoy);
-    if (!mes) mes = S.hoy.slice(0, 7);
+    if (!mes) mes = mesInicial();
     YO = lsGet('prod_yo');
     nav(); render();
   } catch (e) {
@@ -983,12 +1013,12 @@ function vCarga() {
 // ═════════ CLIENTES ═════════
 const incluyeLabel = c => incluyeDe(c).map(k => SERV[k] || k).concat(c.alcanceOtro ? [c.alcanceOtro] : []).join(' · ') || (c.servicio || '—');
 function mesesDe(c) {
-  const hm = S.hoy.slice(0, 7), set = {}; set[hm] = 1; set[mesAdd(hm, 1)] = 1;
+  const hm = mesInicial(), set = {}; set[hm] = 1; set[mesAdd(hm, 1)] = 1;
   lotes(S.tareas).filter(l => l.clienteId === c.id).forEach(l => { if (l.tareas.some(t => t.estado !== 'Listo') || fechaEntrega(l) >= addDays(S.hoy, -20)) set[l.ciclo.slice(0, 7)] = 1; });
   return Object.keys(set).sort();
 }
 function vClientes() {
-  const cl = activos(), ls = lotes(S.tareas), hm = S.hoy.slice(0, 7);
+  const cl = activos(), ls = lotes(S.tareas), hm = mesInicial();
   let h = '<div class="head"><h2>Clientes activos</h2><div class="row"><button class="btn sm p" data-act="gen-mes" data-m="' + hm + '"><i class="ti ti-wand"></i>Generar lotes de ' + MESES_L[+hm.slice(5, 7) - 1] + '</button><button class="btn sm" data-act="gen-mes" data-m="' + mesAdd(hm, 1) + '"><i class="ti ti-wand"></i>' + MESES_L[+mesAdd(hm, 1).slice(5, 7) - 1] + '</button></div></div><p class="sub" style="margin-bottom:10px">Piezas, servicios y renovaciones vienen del CRM; las fechas de entrega, de aquí. Cada cliente recibe todo lo contratado en una sola entrega al mes. Cada lote se acomoda en los huecos que dejan los demás.</p>';
   if (!cl.length) return h + '<div class="empty">No hay clientes activos en el CRM</div>';
   h += '<div class="grid2">' + cl.map(c => {
@@ -999,7 +1029,7 @@ function vClientes() {
     else if (!cr.entregas.length) cuerpo = '<div class="alert w" style="margin:10px 0 0">Sin fecha de entrega. Defínela en «Fechas y reglas».</div>';
     else {
       cuerpo = mesesDe(c).map(m => { let s = ''; for (let j = 1; j <= tn; j++) {
-        if (!loteValido(c, m, j)) continue;
+        if (!loteValido(c, m, j) && !ls.some(x => x.clienteId === c.id && x.ciclo === m + '-' + j)) continue;
         const id = m + '-' + j, l = ls.find(x => x.clienteId === c.id && x.ciclo === id), pl = datosLote(c, id), n = piezasTanda(c.piezas, tn, j), f3 = fechas3(c, id), tent = tentativo(c, promesa(c, m, j)), cierre = esCierre(c, m, j), ec = f3 && (f3.editado || f3.guiones);
         s += '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>' + mesLabel(m) + (tn > 1 ? ' · entrega ' + j : '') + '</b><span class="sub">' + n + ' piezas</span></div>' +
           ((tent || cierre) ? '<div class="row" style="gap:4px;margin:2px 0">' + (tent ? '<span class="badge b-warn">Renovación pendiente</span>' : '') + (cierre ? '<span class="badge b-pend">Último lote · incluye cierre ordenado</span>' : '') + '</div>' : '') +
@@ -1013,7 +1043,7 @@ function vClientes() {
       cuerpo += ls.filter(l => l.clienteId === c.id && +l.ciclo.split('-')[2] >= 90).sort((a, b) => fechaEntrega(a).localeCompare(fechaEntrega(b))).map(l => { const hechas = l.tareas.filter(t => t.estado === 'Listo').length; return '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>Lote extra · entrega ' + dm(fechaEntrega(l)) + '</b><span class="sub">' + l.n + ' piezas</span></div><div class="prog"><i style="width:' + Math.round(hechas / l.tareas.length * 100) + '%"></i></div><div class="sub">' + hechas + ' de ' + l.tareas.length + ' tareas listas</div><div class="row" style="margin-top:6px"><button class="btn sm" data-act="retraso" data-id="' + esc(c.id) + '" data-ciclo="' + l.ciclo + '"><i class="ti ti-clock-pause"></i>Retraso del cliente</button><button class="btn sm d" data-act="borrarlote" data-id="' + esc(c.id) + '" data-ciclo="' + l.ciclo + '"><i class="ti ti-trash"></i></button></div></div>'; }).join('');
     }
     const nx = S.extras.filter(x => x.clienteId === c.id && String(x.fecha).slice(0, 7) === hm).length, p2 = S.equipo.find(x => x.id === cr.coautor), asg = Object.keys(cr.asig).map(k => { const ps = String(cr.asig[k]).split('+').map(i => S.equipo.find(x => x.id === i)).filter(Boolean); return ps.length ? k + ': ' + ps.map(p => p.nombre).join(' + ') : ''; }).filter(Boolean).join(' · ');
-    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="fechas" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Fechas y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span>' + (cr.entregas.length ? '<span class="badge b-listo">Entrega el ' + cr.entregas.join(' y ') + '</span>' : '') + (cr.primera && cr.primera > S.hoy ? '<span class="badge b-rev">Empieza el ' + dm(cr.primera) + '</span>' : '') + (cr.ultima ? '<span class="badge b-pend">Última entrega ' + dm(cr.ultima) + '</span>' : '') + (cr.graba ? '<span class="badge b-azul">' + (cr.graba === 'sinergia' ? 'Graba Sinergia' : 'Graba el cliente') + '</span>' : '') + (cr.prio ? '<span class="badge b-rev">Prioridad ' + cr.prio + '</span>' : '') + '</div>' +
+    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="fechas" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Fechas y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span>' + (cr.entregas.length ? '<span class="badge b-listo">' + (cr.dGuiones && cr.dMaterial && cr.entregas.length === 1 ? 'Guiones ' + cr.dGuiones + ' · ' + (incluyeDe(c).includes('grabacion') ? 'Grabamos ' : 'Material ') + cr.dMaterial + ' · Entrega ' + cr.entregas[0] : 'Entrega el ' + cr.entregas.join(' y ') + ' (guiones y material automáticos)') + '</span>' : '') + (cr.primera && cr.primera > S.hoy ? '<span class="badge b-rev">Empieza el ' + dm(cr.primera) + '</span>' : '') + (cr.ultima ? '<span class="badge b-pend">Última entrega ' + dm(cr.ultima) + '</span>' : '') + (cr.graba ? '<span class="badge b-azul">' + (cr.graba === 'sinergia' ? 'Graba Sinergia' : 'Graba el cliente') + '</span>' : '') + (cr.prio ? '<span class="badge b-rev">Prioridad ' + cr.prio + '</span>' : '') + '</div>' +
       (sh ? '<div class="sub" style="margin-top:6px">Servicio registrado en el CRM hasta el ' + dm(sh) + '</div>' : '') + (cr.aprobador ? '<div class="sub" style="margin-top:4px">Aprueba: ' + esc(cr.aprobador) + '</div>' : '') + (p2 && cr.coautorPiezas ? '<div class="sub" style="margin-top:4px">' + esc(p2.nombre) + ' escribe ' + cr.coautorPiezas + ' guion' + (cr.coautorPiezas > 1 ? 'es' : '') + ' por entrega</div>' : '') + (asg ? '<div class="sub" style="margin-top:4px">Asignado: ' + esc(asg) + '</div>' : '') + ((cr.diasAprob || cr.diasGrab) ? '<div class="sub" style="margin-top:4px">' + (cr.diasAprob ? 'Aprueba en ' + cr.diasAprob + ' días' : '') + (cr.diasAprob && cr.diasGrab ? ' · ' : '') + (cr.diasGrab ? 'graba en ' + cr.diasGrab + ' días' : '') + '</div>' : '') + cuerpo +
       '<div class="row" style="margin-top:12px;justify-content:space-between;border-top:1px solid var(--border);padding-top:10px"><span class="sub">Pedidos fuera del plan este mes: ' + nx + '</span><div class="row"><button class="btn sm" data-act="extra" data-id="' + esc(c.id) + '"><i class="ti ti-plus"></i>Registrar pedido</button><button class="btn sm" data-act="lote-extra" data-id="' + esc(c.id) + '"><i class="ti ti-package"></i>Lote extra</button></div></div></div>';
   }).join('') + '</div>';
@@ -1088,8 +1118,8 @@ function abrirFechas(id) {
   const cr = cronoDe(id); ctxCli = id;
   const personas = S.equipo.filter(p => p.activo !== 'NO'), chkAsig = () => '<div><label class="l">Grabación (marca a todas las que van)</label><div id="f-asig-grabacion" class="check-grid">' + personas.map(p => '<label><input type="checkbox" value="' + esc(p.id) + '" ' + (String(cr.asig.grabacion || '').split('+').indexOf(p.id) >= 0 ? 'checked' : '') + '> ' + esc(p.nombre) + '</label>').join('') + '</div></div>', selAsig = rol => '<div><label class="l">' + ({ guion: 'Guiones', grabacion: 'Grabación', edicion: 'Edición', calidad: 'Calidad' })[rol] + '</label><select id="f-asig-' + rol + '"><option value="">Automático</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.asig[rol] === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>';
   openModal('<h3>Fechas y reglas · ' + esc(c.nombre) + '</h3><div class="sub">' + c.piezas + ' piezas al mes, todas en una sola entrega</div>' +
-    '<label class="l">Día del mes en que recibe TODO su contenido</label><input id="f-entregas" value="' + esc(cr.entregas.join(', ')) + '" placeholder="Ej: 20">' +
-    '<div class="sub" style="margin-top:4px">Es la fecha fija de su contrato. Todo lo demás (escritura, aprobación, grabación, edición) se calcula hacia atrás. Solo si alguna vez entregas en dos partes, pon los dos días separados por coma.</div>' +
+    '<label class="l">Las 3 fechas de cada mes (día del mes)</label><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px"><div><label class="l" style="margin-top:0">Enviamos los guiones</label><input type="number" id="f-dgui" min="1" max="31" value="' + (cr.dGuiones || '') + '" placeholder="automático"></div><div><label class="l" style="margin-top:0">' + (incluyeDe(c).includes('grabacion') ? 'Grabamos' : 'Nos entregan el material') + '</label><input type="number" id="f-dmat" min="1" max="31" value="' + (cr.dMaterial || '') + '" placeholder="automático"></div><div><label class="l" style="margin-top:0">Entregamos lo editado</label><input id="f-entregas" value="' + esc(cr.entregas.join(', ')) + '" placeholder="Ej: 20"></div></div>' +
+    '<div class="sub" style="margin-top:4px">Ponlas tú, contando solo días hábiles (lunes a sábado, sin domingos ni feriados). Si dejas guiones y material vacíos, el sistema los calcula hacia atrás desde la entrega. Abajo te dice si los plazos alcanzan.</div><div id="f-eval" class="alert i" style="margin-top:8px"></div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Días que tarda en aprobar</label><input type="number" id="f-dapr" min="1" value="' + (cr.diasAprob || '') + '" placeholder="' + diasAprob() + ' (general)"></div><div><label class="l">Días que tarda en grabar</label><input type="number" id="f-dgrab" min="1" value="' + (cr.diasGrab || '') + '" placeholder="' + diasGrab() + ' (general)"></div></div><div class="sub" style="margin-top:4px">Déjalos vacíos para usar los días generales de Ajustes. Un cliente que graba muchos videos necesita más días.</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Primera entrega</label><input type="date" id="f-primera" value="' + esc(cr.primera) + '"></div><div><label class="l">Última entrega</label><input type="date" id="f-ultima" value="' + esc(cr.ultima) + '"></div></div><div class="sub" style="margin-top:4px"><b>Primera:</b> para un cliente nuevo, desde cuándo se le entrega (vacía si ya está en marcha). <b>Última:</b> llénala cuando sepas que NO renueva: dejan de proyectarse sus lotes (se libera su capacidad) y el último lleva el cierre ordenado.</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Quién graba</label><select id="f-graba"><option value="" ' + (!cr.graba ? 'selected' : '') + '>Lo que diga el CRM</option><option value="cliente" ' + (cr.graba === 'cliente' ? 'selected' : '') + '>El cliente graba</option><option value="sinergia" ' + (cr.graba === 'sinergia' ? 'selected' : '') + '>Sinergia graba</option></select></div><div><label class="l">Prioridad en la cola de edición</label><input type="number" id="f-prio" min="1" value="' + (cr.prio || '') + '" placeholder="Automática"></div></div><div class="sub" style="margin-top:4px">Si el CRM dice que grabamos pero no es así (o al revés), corrígelo aquí. Prioridad: 1 edita primero; vacío = el que más edición lleva va primero.</div>' +
@@ -1097,16 +1127,49 @@ function abrirFechas(id) {
     '<label class="l">Otra persona que también escribe guiones de este cliente</label><div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><select id="f-coautor"><option value="">Nadie: los escribe quien tiene el rol</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.coautor === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select><input type="number" id="f-copz" min="0" value="' + (cr.coautorPiezas || '') + '" placeholder="Cuántos"></div><div class="sub" style="margin-top:4px">Por cada entrega: esa persona escribe ese número de guiones (en sus propias horas) y el resto, quien tiene el rol de guion.</div>' +
     '<label class="l">Quién aprueba de su lado</label><input id="f-aprob" value="' + esc(cr.aprobador) + '"><label class="l">Notas (canal de aprobación, horarios, cuándo graba…)</label><textarea id="f-notas" rows="2">' + esc(cr.notas) + '</textarea>' +
     '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="fechas-ok">Guardar</button></div>');
+  evalFechasUI();
+}
+const MAX_DIA = 31;
+function ymFechas() { const hm = S.hoy.slice(0, 7); return desdeMes() && desdeMes() > hm ? desdeMes() : hm; }
+// Muestra en vivo si las 3 fechas alcanzan (en días hábiles) y qué pondría el sistema solo
+function evalFechasUI() {
+  const box = $('f-eval'), c = S.clientes.find(x => x.id === ctxCli); if (!box || !c) return;
+  const dE = parseInt($('f-entregas').value), dG = parseInt($('f-dgui').value) || 0, dM = parseInt($('f-dmat').value) || 0, ym = ymFechas();
+  if (!(dE >= 1 && dE <= MAX_DIA) || String($('f-entregas').value).indexOf(',') >= 0) { box.className = 'alert i'; box.innerHTML = 'Pon el día de entrega (un solo día) y te digo qué fechas alcanzan.'; return; }
+  const r = evaluarFechas(c, ym, dG, dM, dE), n = r.nat; if (!n) { box.innerHTML = ''; return; }
+  const auto = (r.g ? 'guiones el <b>' + corta(n.envio) + '</b>, ' : '') + (r.ed ? (incluyeDe(c).includes('grabacion') ? 'grabación hasta el <b>' : 'material el <b>') + corta(n.material) + '</b>, ' : '') + 'entrega el <b>' + corta(r.E) + '</b>';
+  const h = '<b>' + mesLabel(ym) + '</b>: ';
+  if (!dG && !dM) { box.className = 'alert i'; box.innerHTML = h + 'con esa entrega, el sistema pone solo: ' + auto + '. Si quieres fijarlas tú, llena guiones y material.'; return; }
+  if (!dG || !dM) { box.className = 'alert w'; box.innerHTML = h + 'pon las tres fechas, o deja guiones y material vacíos para que sean automáticos.'; return; }
+  if (!r.orden) { box.className = 'alert r'; box.innerHTML = h + 'las fechas deben ir en orden: guiones (' + corta(r.S) + ') → material (' + corta(r.M) + ') → entrega (' + corta(r.E) + ').'; return; }
+  const okC = !r.g || !r.ed || r.cliente >= r.necCliente, okE = !r.ed || r.equipo >= r.necEquipo, dias = x => x + ' día' + (x === 1 ? '' : 's') + ' hábil' + (x === 1 ? '' : 'es');
+  const ls = [];
+  if (r.g && r.ed) ls.push((okC ? '✓' : '⚠') + ' Del envío de guiones al material hay ' + dias(r.cliente) + '; el cliente necesita al menos ' + dias(r.necCliente) + ' (aprobar y grabar).');
+  const justo = r.ed && !okE && r.equipo >= r.necEquipo - colchon();
+  if (r.ed) ls.push(okE ? '✓ Del material a la entrega hay ' + dias(r.equipo) + '; el equipo necesita ' + dias(r.necEquipo) + ' (editar ' + c.piezas + ' piezas y revisar la calidad).' : (justo ? '⚠ Del material a la entrega hay ' + dias(r.equipo) + ': alcanza justo, sin colchón (con el colchón de ' + colchon() + ' día' + (colchon() === 1 ? '' : 's') + ' el equipo necesita ' + dias(r.necEquipo) + ').' : '⚠ Del material a la entrega hay ' + dias(r.equipo) + '; el equipo necesita al menos ' + dias(r.necEquipo) + ' (editar ' + c.piezas + ' piezas y revisar la calidad).'));
+  box.className = 'alert ' + (okC && okE ? 'i' : 'w');
+  box.innerHTML = h + ls.join('<br>') + (okC && okE ? '' : '<br>Lo mínimo que alcanza con esa entrega: ' + auto + '. <button class="btn sm" data-act="f-auto" style="margin-left:6px">Usar esas fechas</button>');
+}
+function autoFechas() {
+  const c = S.clientes.find(x => x.id === ctxCli), dE = parseInt($('f-entregas').value), ym = ymFechas(); if (!c || !(dE >= 1)) return;
+  const r = evaluarFechas(c, ym, 0, 0, dE), n = r.nat; if (!n) return;
+  if (n.envio) $('f-dgui').value = parseInt(n.envio.slice(8));
+  if (n.material) $('f-dmat').value = parseInt(n.material.slice(8));
+  evalFechasUI();
 }
 async function guardarFechas() {
   const txt = $('f-entregas').value.trim(), nums = txt ? txt.split(',').map(s => parseInt(s)) : [];
   if (txt && nums.some(n => !(n >= 1 && n <= 31))) { alert('Escribe días del mes entre 1 y 31, separados por coma. Ej: 20'); return; }
   const copz = parseInt($('f-copz').value) || 0, co = $('f-coautor').value;
   if (co && !copz) { alert('Indica cuántos guiones escribe esa persona'); return; }
+  const dg = parseInt($('f-dgui').value) || 0, dm_ = parseInt($('f-dmat').value) || 0;
+  if (!!dg !== !!dm_) { alert('Pon las tres fechas (guiones, material y entrega) o deja guiones y material vacíos'); return; }
+  if (dg && nums.length !== 1) { alert('Para fijar guiones y material, la entrega debe ser un solo día'); return; }
+  if (dg && !(dg < dm_ && dm_ < nums[0])) { alert('Las fechas deben ir en orden: guiones, luego material, luego entrega'); return; }
   const pri = $('f-primera').value, ult = $('f-ultima').value;
   if (pri && ult && ult < pri) { alert('La última entrega no puede ser antes de la primera'); return; }
   const asg = ['guion', 'grabacion', 'edicion', 'calidad'].map(r => { const v = r === 'grabacion' ? Array.from(document.querySelectorAll('#f-asig-grabacion input:checked')).map(i => i.value).join('+') : $('f-asig-' + r).value; return v ? r + ':' + v : ''; }).filter(Boolean).join(',');
-  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim(), coautor: co && copz ? co : '', coautorPiezas: co && copz ? copz : '', diasAprob: parseInt($('f-dapr').value) || '', diasGrab: parseInt($('f-dgrab').value) || '', primeraEntrega: pri, ultimaEntrega: ult, asignaciones: asg, graba: $('f-graba').value, prioridad: parseInt($('f-prio').value) || '' };
+  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim(), coautor: co && copz ? co : '', coautorPiezas: co && copz ? copz : '', diasAprob: parseInt($('f-dapr').value) || '', diasGrab: parseInt($('f-dgrab').value) || '', diaGuiones: dg || '', diaMaterial: dm_ || '', primeraEntrega: pri, ultimaEntrega: ult, asignaciones: asg, graba: $('f-graba').value, prioridad: parseInt($('f-prio').value) || '' };
   closeModal(); loading(true, 'Guardando…');
   try { const r = await api('saveCronograma', { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
@@ -1165,10 +1228,9 @@ async function guardarExtra(desc, tipo, cid) {
 const planSim = f => construirPlan({ entrega: f, tanda: 1, tandas: 1, piezas: sim.piezas, incluye: sim.incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), investigacion: sim.inv }).plan;
 function calcSim() {
   const incl = Array.from(document.querySelectorAll('#sim-incl input:checked')).map(i => i.value), piezas = parseInt($('sim-piezas').value) || 0, inv = $('sim-inv').checked;
-  const conf = !!($('sim-conf') && $('sim-conf').checked);
-  sim = { piezas, incl, inv, conf, res: null };
+  sim = { piezas, incl, inv, res: null };
   if (piezas > 0) {
-    const hm = S.hoy.slice(0, 7), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 2), { soloConfirmados: conf }));
+    const hm = S.hoy.slice(0, 7), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 2)));
     const found = buscarEntregas({ desde: S.hoy, hoy: S.hoy, piezas, incluye: incl, etapas: S.etapas, equipo: S.equipo, fer: FER(), diasAprob: diasAprob(), diasGrab: diasGrab(), tareas, umbral: umbral(), investigacion: inv });
     sim.res = { found, cap: capacidadActual(hm).filter(x => x.margen !== null).sort((a, b) => a.margen - b.margen) };
   }
@@ -1176,7 +1238,7 @@ function calcSim() {
 }
 function vSimulador() {
   let h = '<div class="head"><h2>Simulador de nuevos clientes</h2></div><p class="sub" style="margin-bottom:10px">Antes de ofrecer un cupo: ¿en qué fecha podría recibir su contenido sin que nadie se pase de sus horas? Se suma su trabajo a todo lo que ya está comprometido.</p>';
-  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div></div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sim-inv" style="width:auto" ' + (sim.inv ? 'checked' : '') + '> Incluir la investigación inicial (8 h de Alejandra)</label><label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sim-conf" style="width:auto" ' + (sim.conf ? 'checked' : '') + '> No contar los lotes de clientes con renovación pendiente (mejor escenario)</label><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
+  h += '<div class="card"><div class="row"><div><label class="l">Piezas por mes</label><input type="number" id="sim-piezas" min="1" value="' + sim.piezas + '" style="width:120px"></div></div><label class="l">¿Qué incluiría?</label><div class="check-grid" id="sim-incl">' + ['guion', 'grabacion', 'edicion', 'trafico'].map(k => '<label><input type="checkbox" value="' + k + '" ' + (sim.incl.includes(k) ? 'checked' : '') + '> ' + SERV[k] + '</label>').join('') + '</div><label class="l" style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" id="sim-inv" style="width:auto" ' + (sim.inv ? 'checked' : '') + '> Incluir la investigación inicial (8 h de Alejandra)</label><div style="margin-top:14px"><button class="btn p" data-act="sim"><i class="ti ti-player-play"></i>Simular</button></div></div>';
   if (sim.res) {
     const r = sim.res, cu = r.cap[0];
     if (cu) h += '<div class="alert ' + (sim.piezas > cu.margen ? 'r' : 'i') + '">Hoy, con lo que ya tienen contratado, el cuello de botella es <b>' + esc(cu.nombre) + '</b> (' + Math.round(cu.pct * 100) + '% de ' + (cu.enVentana ? 'su tramo de edición' : 'su mes') + '): caben <b>≈ ' + cu.margen + ' piezas más en este ciclo</b> sin pasar del ' + Math.round(umbral() * 100) + '%.' + (sim.piezas > cu.margen ? ' Un cliente de ' + sim.piezas + ' piezas <b>supera ese margen</b>: haría falta más horas de ' + esc(cu.nombre) + ' o alguien más.' : '') + '</div>';
@@ -1215,7 +1277,7 @@ function vAjustes() {
   h += '<div class="card"><h4 style="margin-bottom:4px">Equipo y horas</h4><p class="sub" style="margin-bottom:8px">Horas de trabajo por día: de lunes a viernes y el sábado (hasta el mediodía). Roles separados por coma: guion, grabacion, edicion, calidad, trafico. Si cambias el nombre de alguien, sus tareas se actualizan solas.</p><div class="scroll"><table class="tbl" id="t-eq"><thead><tr><th>Nombre</th><th>Roles</th><th>Horas L–V</th><th>Horas sáb</th><th>Semana</th><th>Ausencias</th><th>Activo</th><th></th></tr></thead><tbody>' +
     S.equipo.map(p => '<tr data-id="' + esc(p.id) + '"><td><input data-f="nombre" value="' + esc(p.nombre) + '" style="width:130px"></td><td><input data-f="roles" value="' + esc(p.roles) + '" style="width:170px"></td><td><input data-f="horasDia" type="number" min="0" step="0.5" value="' + esc(p.horasDia === '' || p.horasDia == null ? 8 : p.horasDia) + '" style="width:70px"></td><td><input data-f="horasSab" type="number" min="0" step="0.5" value="' + esc(p.horasSab === '' || p.horasSab == null ? 4 : p.horasSab) + '" style="width:70px"></td><td><span class="sub">' + capSemNom(p) + ' h</span></td><td><input data-f="ausencias" value="' + esc(p.ausencias || '') + '" placeholder="2026-12-20/2027-01-03" style="width:190px"></td><td><select data-f="activo"><option ' + (p.activo !== 'NO' ? 'selected' : '') + '>SI</option><option ' + (p.activo === 'NO' ? 'selected' : '') + '>NO</option></select></td><td><button class="btn sm d" data-act="eq-del"><i class="ti ti-x"></i></button></td></tr>').join('') +
     '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="eq-add"><i class="ti ti-plus"></i>Agregar persona</button><button class="btn sm p" data-act="eq-save"><i class="ti ti-device-floppy"></i>Guardar equipo</button></div></div>';
-  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Días para aprobar guiones y contenido</label><input id="cfg-aprob" type="number" min="1" value="' + diasAprob() + '" style="width:110px"></div><div><label class="l">Días de grabación</label><input id="cfg-grab" type="number" min="1" value="' + diasGrab() + '" style="width:110px"></div><div><label class="l">Rondas de cambios incluidas</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div><div><label class="l">Planificar hasta (% de las horas)</label><input id="cfg-umbral" type="number" min="50" max="100" value="' + Math.round(umbral() * 100) + '" style="width:110px"></div><div><label class="l">Colchón de entrega (días laborables)</label><input id="cfg-colchon" type="number" min="0" value="' + colchon() + '" style="width:110px"></div><div><label class="l">Días sin respuesta para dar por aprobado</label><input id="cfg-tacita" type="number" min="1" value="' + num(S.config.diasTacita, 5) + '" style="width:110px"></div><div><label class="l">Tope de entrega (día del mes siguiente)</label><input id="cfg-tope" type="number" min="1" max="28" value="' + topeDia() + '" style="width:110px"></div><div><label class="l">Reserva final (días laborables)</label><input id="cfg-reserva" type="number" min="0" value="' + reservaDias() + '" style="width:110px"></div></div><p class="sub" style="margin-top:4px">Colchón: el equipo apunta a terminar esos días antes de la fecha que se le promete al cliente. Tope: todo el contenido debe estar listo ese día (1 = el 1 de cada mes; si no es laborable, el último día laborable anterior). Reserva: días laborables que quedan libres antes del tope para absorber atrasos.</p><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><label class="l">Feriados (MM-DD se repite cada año; AAAA-MM-DD es solo ese día)</label><input id="cfg-fer" value="' + esc(S.config.feriados || '') + '" style="width:100%"><p class="sub" style="margin-top:4px">Revisa esta lista: incluye los feriados nacionales de fecha fija; agrega los que cambian cada año (Semana Santa, feriados puente).</p><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
+  h += '<div class="card"><h4 style="margin-bottom:4px">Reglas</h4><div class="row" style="align-items:flex-end"><div><label class="l">Días para aprobar guiones y contenido</label><input id="cfg-aprob" type="number" min="1" value="' + diasAprob() + '" style="width:110px"></div><div><label class="l">Días de grabación</label><input id="cfg-grab" type="number" min="1" value="' + diasGrab() + '" style="width:110px"></div><div><label class="l">Rondas de cambios incluidas</label><input id="cfg-rondas" type="number" min="0" value="' + rondasMax() + '" style="width:110px"></div><div><label class="l">Planificar hasta (% de las horas)</label><input id="cfg-umbral" type="number" min="50" max="100" value="' + Math.round(umbral() * 100) + '" style="width:110px"></div><div><label class="l">Colchón de entrega (días laborables)</label><input id="cfg-colchon" type="number" min="0" value="' + colchon() + '" style="width:110px"></div><div><label class="l">Días sin respuesta para dar por aprobado</label><input id="cfg-tacita" type="number" min="1" value="' + num(S.config.diasTacita, 5) + '" style="width:110px"></div><div><label class="l">Planificar desde (mes)</label><input id="cfg-desde" type="month" value="' + esc(desdeMes()) + '" style="width:160px"></div><div><label class="l">Tope de entrega (día del mes siguiente)</label><input id="cfg-tope" type="number" min="1" max="28" value="' + topeDia() + '" style="width:110px"></div><div><label class="l">Reserva final (días laborables)</label><input id="cfg-reserva" type="number" min="0" value="' + reservaDias() + '" style="width:110px"></div></div><p class="sub" style="margin-top:4px">Colchón: el equipo apunta a terminar esos días antes de la fecha que se le promete al cliente. Tope: todo el contenido debe estar listo ese día (1 = el 1 de cada mes; si no es laborable, el último día laborable anterior). Reserva: días laborables que quedan libres antes del tope para absorber atrasos.</p><label class="l">Checklist de control de calidad (separa con comas)</label><input id="cfg-chk" value="' + esc(checklistItems().join(', ')) + '" style="width:100%"><label class="l">Feriados (MM-DD se repite cada año; AAAA-MM-DD es solo ese día)</label><input id="cfg-fer" value="' + esc(S.config.feriados || '') + '" style="width:100%"><p class="sub" style="margin-top:4px">Revisa esta lista: incluye los feriados nacionales de fecha fija; agrega los que cambian cada año (Semana Santa, feriados puente).</p><div style="margin-top:10px"><button class="btn sm p" data-act="cfg-save"><i class="ti ti-device-floppy"></i>Guardar reglas</button></div></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Etapas de cada lote</h4><p class="sub" style="margin-bottom:8px">Las fechas se calculan <b>hacia atrás</b> desde la entrega fija del cliente. <b>Por pieza</b>: una tarea por video, repartidas según lo que rinde la persona cada día. <b>Una por lote</b>: una sola tarea. <b>Ancla</b>: de qué fecha cuelga. <b>± días</b>: días laborables antes (−) o después (+) de esa fecha. <b>Horas</b>: lo que toma cada tarea. <b>Requiere / Excluye</b>: la etapa solo existe si el cliente incluye (o no) ese servicio. <b>Calendario</b>: se publica en Google Calendar. <b>Guía</b>: pasos de «cómo se hace», separados por |.</p><div class="scroll"><table class="tbl" id="t-et"><thead><tr><th>Etapa</th><th>Rol</th><th>Alcance</th><th>Ancla</th><th>± días</th><th>Horas</th><th>Requiere</th><th>Excluye</th><th>Calendario</th><th>Guía</th><th></th></tr></thead><tbody>' + S.etapas.slice().sort((a, b) => (+a.orden || 0) - (+b.orden || 0)).map(filaEtapa).join('') + '</tbody></table></div><div class="row" style="margin-top:10px"><button class="btn sm" data-act="et-add"><i class="ti ti-plus"></i>Agregar etapa</button><button class="btn sm p" data-act="et-save"><i class="ti ti-device-floppy"></i>Guardar etapas</button></div><p class="sub" style="margin-top:8px">Cambiar etapas no modifica lotes ya creados; aplica a los que generes después.</p></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Manuales</h4><p class="sub" style="margin-bottom:8px">Enlaces a sus documentos del Drive. El primero aparece como botón arriba.</p>' + [['cfg-u-manual', 'manualUrl', 'Manual de procesos y sistemas'], ['cfg-u-turnos', 'turnosUrl', 'Sistema de turnos de producción (referencia anterior)'], ['cfg-u-politica', 'politicaUrl', 'Política de revisiones y aprobaciones'], ['cfg-u-calidad', 'calidadUrl', 'Checklist de control de calidad']].map(u => '<label class="l">' + u[2] + '</label><input id="' + u[0] + '" value="' + esc(S.config[u[1]] || '') + '" style="width:100%">').join('') + '<div style="margin-top:10px"><button class="btn sm p" data-act="urls-save"><i class="ti ti-device-floppy"></i>Guardar enlaces</button></div></div>';
   h += '<div class="card"><h4 style="margin-bottom:4px">Google Calendar</h4><p class="sub" style="margin-bottom:8px">Publica en el calendario de Sinergia las etapas con Calendario = SI (por defecto: envío de guiones, grabación o material, entrega y campañas) como eventos de todo el día con el prefijo «Prod ·». Si cambian fechas o responsables, vuelve a sincronizar.</p><button class="btn sm p" data-act="cal-sync"><i class="ti ti-calendar-event"></i>Sincronizar con Google Calendar</button></div>';
@@ -1246,7 +1308,7 @@ async function guardarEtapas() {
   } catch (e) { alert('Error al guardar las etapas: ' + e.message + '\nLo que ya se guardó se conserva; vuelve a intentarlo.'); try { await cargar(); render(); } catch (e2) {} }
   loading(false);
 }
-const guardarReglas = () => guardar('saveConfig', { pares: { diasAprob: String(Math.max(1, parseInt($('cfg-aprob').value) || 2)), diasGrab: String(Math.max(1, parseInt($('cfg-grab').value) || 2)), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), umbralCarga: String(Math.min(100, Math.max(50, parseInt($('cfg-umbral').value) || 85))), colchon: String(Math.max(0, parseInt($('cfg-colchon').value) || 0)), topeDia: String(Math.min(28, Math.max(1, parseInt($('cfg-tope').value) || 1))), reserva: String(Math.max(0, parseInt($('cfg-reserva').value) || 0)), diasTacita: String(Math.max(1, parseInt($('cfg-tacita').value) || 5)), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|'), feriados: $('cfg-fer').value.split(',').map(s => s.trim()).filter(Boolean).join(',') } });
+const guardarReglas = () => guardar('saveConfig', { pares: { diasAprob: String(Math.max(1, parseInt($('cfg-aprob').value) || 2)), diasGrab: String(Math.max(1, parseInt($('cfg-grab').value) || 2)), rondasMax: String(Math.max(0, parseInt($('cfg-rondas').value) || 0)), umbralCarga: String(Math.min(100, Math.max(50, parseInt($('cfg-umbral').value) || 85))), colchon: String(Math.max(0, parseInt($('cfg-colchon').value) || 0)), desdeMes: ($('cfg-desde').value || ''), topeDia: String(Math.min(28, Math.max(1, parseInt($('cfg-tope').value) || 1))), reserva: String(Math.max(0, parseInt($('cfg-reserva').value) || 0)), diasTacita: String(Math.max(1, parseInt($('cfg-tacita').value) || 5)), checklist: $('cfg-chk').value.split(',').map(s => s.trim()).filter(Boolean).join('|'), feriados: $('cfg-fer').value.split(',').map(s => s.trim()).filter(Boolean).join(',') } });
 const guardarUrls = () => guardar('saveConfig', { pares: { manualUrl: $('cfg-u-manual').value.trim(), turnosUrl: $('cfg-u-turnos').value.trim(), politicaUrl: $('cfg-u-politica').value.trim(), calidadUrl: $('cfg-u-calidad').value.trim() } });
 async function borrarInactivo(id) {
   if (!confirm('¿Borrar las tareas pendientes de este cliente? Lo ya hecho se conserva.')) return;
@@ -1400,10 +1462,11 @@ async function accionPieza(act, cid, ciclo, pz) {
 // ═════════ PLAN DEL MES y COLA DE EDICIÓN ═════════
 async function usarPlan() {
   const P = planActual; if (!P || !P.plan.length) return;
-  if (!confirm('Se guardará este día de entrega para cada cliente (se repite cada mes):\n\n' + P.plan.map(x => '· ' + x.item.c.nombre + ': el ' + parseInt(x.entrega.slice(8))).join('\n') + '\n\n¿Continuar?')) return;
+  if (!confirm('Se guardarán estas 3 fechas para cada cliente (día del mes; se repiten cada mes y las puedes ajustar después en Clientes):\n\n' + P.plan.map(x => '· ' + x.item.c.nombre + ': guiones ' + (x.plan.envio ? parseInt(x.plan.envio.slice(8)) : '—') + ', material ' + (x.plan.material ? parseInt(x.plan.material.slice(8)) : '—') + ', entrega ' + parseInt(x.entrega.slice(8))).join('\n') + '\n\n¿Continuar?')) return;
   loading(true, 'Guardando fechas…');
   try {
-    for (const x of P.plan) { const r = await api('saveCronograma', { d: Object.assign(cronoFila(x.item.c.id), { entregas: String(parseInt(x.entrega.slice(8))) }) }); if (!r.ok) throw new Error(r.error); }
+    for (const x of P.plan) { const pl = x.plan || {}, mismo = pl.envio && pl.material && pl.envio.slice(0, 7) === x.entrega.slice(0, 7) && pl.material.slice(0, 7) === x.entrega.slice(0, 7) && pl.envio < pl.material && pl.material < x.entrega;
+      const r = await api('saveCronograma', { d: Object.assign(cronoFila(x.item.c.id), { entregas: String(parseInt(x.entrega.slice(8))), diaGuiones: mismo ? parseInt(pl.envio.slice(8)) : '', diaMaterial: mismo ? parseInt(pl.material.slice(8)) : '' }) }); if (!r.ok) throw new Error(r.error); }
     await cargar(); render(); alert('Fechas guardadas. Ahora, en Clientes, borra los lotes de este ciclo que aún no empezaron y genera los lotes con las fechas nuevas.');
   } catch (e) { alert('Error: ' + e.message); }
   loading(false);
@@ -1434,7 +1497,7 @@ document.addEventListener('click', e => {
   else if (a === 'salir') { lsSet('prod_code', ''); location.reload(); }
   else if (a === 'recargar') { cargar().then(render).catch(err => { setSync('err', 'Error'); alert(err.message); }); }
   else if (a === 'nav') { view = d.v; render(); window.scrollTo(0, 0); }
-  else if (a === 'mes') { mes = d.d === '0' ? S.hoy.slice(0, 7) : mesAdd(mes, parseInt(d.d)); render(); }
+  else if (a === 'mes') { mes = d.d === '0' ? mesInicial() : mesAdd(mes, parseInt(d.d)); render(); }
   else if (a === 'sem') { semOff = d.d === '0' ? 0 : semOff + parseInt(d.d); render(); }
   else if (a === 'irFase') { view = 'piezas'; pFase = d.f; render(); window.scrollTo(0, 0); }
   else if (a === 'irPiezas') { view = 'piezas'; render(); window.scrollTo(0, 0); }
@@ -1459,6 +1522,7 @@ document.addEventListener('click', e => {
   else if (a === 'plan-msgs') abrirMensajesPlan();
   else if (a === 'cola-aplicar') aplicarCola();
   else if (a === 'guia') abrirGuia();
+  else if (a === 'f-auto') autoFechas();
   else if (a === 'retraso') abrirRetraso(id, d.ciclo);
   else if (a === 'retraso-ok') confirmarRetraso();
   else if (a === 'fechas') abrirFechas(id);
@@ -1484,6 +1548,7 @@ document.addEventListener('change', e => {
   else if (f === 'yo') { YO = t.value; lsSet('prod_yo', YO); render(); }
   else if (t.dataset && t.dataset.chk) toggleChk(t.dataset.chk);
   else if (t.id === 'g-inv' || t.id === 'g-pas') prevGen();
+  else if (t.id === 'f-dgui' || t.id === 'f-dmat' || t.id === 'f-entregas') evalFechasUI();
   else if (t.id === 'le-piezas' || t.id === 'le-fecha' || (t.closest && t.closest('#le-incl'))) prevLoteExtra();
 });
 $('overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
