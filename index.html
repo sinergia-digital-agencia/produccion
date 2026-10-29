@@ -210,12 +210,6 @@ const piezasPrevias = (piezas, tandas, j) => { let s = 0; for (let i = 1; i < j;
 // Si el cliente tiene asignada a una persona para ese rol (asig = {edicion: 'camila'}), se usa; si no, la primera con ese rol
 // Un rol puede tener varias personas en un cliente (asig = {grabacion: 'aleja+evo'}): todas reciben la tarea
 const idsAsig = (asig, rol) => String((asig && asig[rol]) || '').split('+').map(x => x.trim()).filter(Boolean);
-// Grabar: las horas son POR VIDEO y por persona que graba. Los videos se reparten entre las que van
-// (4 videos entre 2 personas = 2 y 2) y graban a la vez: cada una carga con sus horas el mismo día.
-function horasGrabacion(piezas, k, hPorVideo) {
-  const n = parseInt(piezas) || 0, kk = Math.max(1, k), base = Math.floor(n / kk), extra = n % kk;
-  return Array.from({ length: kk }, (_, i) => Math.round((base + (i < extra ? 1 : 0)) * num(hPorVideo, 0) * 100) / 100);
-}
 function personasDe(rol, equipo, asig) {
   if (rol === 'cliente') return [];
   const ps = idsAsig(asig, rol).map(id => equipo.find(x => x.id === id && x.activo !== 'NO')).filter(Boolean);
@@ -334,8 +328,8 @@ function generarLote(o) {
     } else {
       let f = fechaAncla(plan, anc); if (f && desp) f = addLab(f, desp, fer);
       if (f && alc === 'cliente' && horas > 0 && !(e.key === 'onboarding' && o.fechaOnb)) { const pp = personasDe(e.rol, o.equipo, o.asig), hPers = (e.key === 'onboarding' && pp.length > 1) ? horas / pp.length : horas; for (let i = 0; i < 10 && pp.some(p => capDisp(p, f, fer, o.ocup) + 1e-9 < hPers); i++) f = prevLab(addDays(f, -1), fer); }   // si van varias personas, el día debe tener hueco para TODAS (en paralelo)
-      if (e.key === 'grabacion') {   // grabar a un cliente: videos repartidos entre las personas, en paralelo, el primer día de la ventana en que todas tengan hueco
-        const gp = personasDe(e.rol, o.equipo, o.asig), hs = horasGrabacion(n, gp.length || 1, horas);
+      if (e.key === 'grabacion') {   // sesión de grabación: dura las horas de la etapa (o las del cliente); cada persona que va la cubre completa, a la vez, el primer día de la ventana en que todas tengan hueco
+        const gp = personasDe(e.rol, o.equipo, o.asig), hs = gp.map(() => (o.grabHoras > 0 ? o.grabHoras : horas));
         if (f && gp.length) {
           const ini = (plan.grab && plan.grab[0]) || f; let dia = f;
           for (let g = ini; g <= f; g = addDays(g, 1)) if (esLab(g, fer) && gp.every((p, i) => capDisp(p, g, fer, o.ocup) + 1e-9 >= hs[i])) { dia = g; break; }
@@ -383,7 +377,7 @@ function demandaMes(clientes, etapas, equipo) {
       d[resp] = (d[resp] || 0) + (c.piezas - co) * h; d[c.coautor.nombre] = (d[c.coautor.nombre] || 0) + co * h; return;
     }
     if (esPieza(e)) d[resp] = (d[resp] || 0) + c.piezas * h;
-    else if (e.key === 'grabacion') { const gp = personasDe(e.rol, equipo, c.asig); horasGrabacion(c.piezas, gp.length || 1, h).forEach((hh, i) => { if (gp[i]) d[gp[i].nombre] = (d[gp[i].nombre] || 0) + hh; }); }
+    else if (e.key === 'grabacion') { const gp = personasDe(e.rol, equipo, c.asig); gp.forEach(p => { d[p.nombre] = (d[p.nombre] || 0) + c.tandas * (c.grabHoras > 0 ? c.grabHoras : h); }); }
     else personasDe(e.rol, equipo, c.asig).forEach(p => { d[p.nombre] = (d[p.nombre] || 0) + c.tandas * h; });
   }));
   // Manejo continuo del tráfico: horas por semana de cada cliente, repartidas entre quienes llevan el tráfico (c.traficoMes = horas del mes)
@@ -618,7 +612,7 @@ const cronoDe = id => {
   const r = S.cronograma.find(x => x.clienteId === id) || {};
   const entregas = String(r.entregas || '').split(',').map(s => parseInt(s)).filter(n => n >= 1 && n <= 31);
   const dA = parseInt(r.diasAprob), dG = parseInt(r.diasGrab);
-  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: parseInt(r.coautorPiezas) || 0, diasAprob: dA >= 1 ? dA : null, diasGrab: dG >= 1 ? dG : null, primera: r.primeraEntrega || '', ultima: r.ultimaEntrega || '', asig: asigMap(r.asignaciones), onboarding: r.fechaOnboarding || '', traficoHSem: parseFloat(r.traficoHSem) > 0 ? parseFloat(r.traficoHSem) : 0, dGuiones: parseInt(r.diaGuiones) >= 1 ? parseInt(r.diaGuiones) : null, dMaterial: parseInt(r.diaMaterial) >= 1 ? parseInt(r.diaMaterial) : null, graba: r.graba === 'cliente' || r.graba === 'sinergia' ? r.graba : '', prio: parseInt(r.prioridad) > 0 ? parseInt(r.prioridad) : null };
+  return { entregas, aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: parseInt(r.coautorPiezas) || 0, diasAprob: dA >= 1 ? dA : null, diasGrab: dG >= 1 ? dG : null, primera: r.primeraEntrega || '', ultima: r.ultimaEntrega || '', asig: asigMap(r.asignaciones), onboarding: r.fechaOnboarding || '', traficoHSem: parseFloat(r.traficoHSem) > 0 ? parseFloat(r.traficoHSem) : 0, grabHoras: parseFloat(r.grabHoras) > 0 ? parseFloat(r.grabHoras) : 0, dGuiones: parseInt(r.diaGuiones) >= 1 ? parseInt(r.diaGuiones) : null, dMaterial: parseInt(r.diaMaterial) >= 1 ? parseInt(r.diaMaterial) : null, graba: r.graba === 'cliente' || r.graba === 'sinergia' ? r.graba : '', prio: parseInt(r.prioridad) > 0 ? parseInt(r.prioridad) : null };
 };
 // Servicios que de verdad hacemos: la grabación sale de «Quién graba» de la ficha del cliente (si está vacío, lo que diga el CRM)
 const incluyeDe = c => { const cr = cronoDe(c.id), base = c.incluye || [], sin = base.filter(k => k !== 'grabacion'); return (cr.graba === 'sinergia' || (cr.graba !== 'cliente' && base.indexOf('grabacion') >= 0)) ? sin.concat(['grabacion']) : sin; };
@@ -653,7 +647,7 @@ function fijasDe(c, ym, prom) {
 }
 function paramsPromesa(c, ym, j, prom, inv) {
   const cr = cronoDe(c.id), fer = FER();
-  return { fijas: fijasDe(c, ym, prom), entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: Object.assign({ onboarding: onboardingDe(c) }, cr.asig), fechaOnb: (!!inv && j === 1 && cr.onboarding) ? cr.onboarding : null, invDias: diasInv(), cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
+  return { fijas: fijasDe(c, ym, prom), grabHoras: cr.grabHoras || null, entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: Object.assign({ onboarding: onboardingDe(c) }, cr.asig), fechaOnb: (!!inv && j === 1 && cr.onboarding) ? cr.onboarding : null, invDias: diasInv(), cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
 }
 function paramsLote(c, loteId, inv) { const ym = loteId.slice(0, 7), j = +loteId.split('-')[2]; return paramsPromesa(c, ym, j, promesa(c, ym, j), inv); }
 // Lo que ya tienen comprometido (tareas pendientes de los demás lotes): el lote nuevo se acomoda en los huecos
@@ -692,7 +686,7 @@ function proyeccion(ymIni, ymFin, opts) {
 const itemsCapacidad = ym => activos().filter(c => c.piezas > 0).map(c => {
   const cr = cronoDe(c.id), p2 = S.equipo.find(x => x.id === cr.coautor); let n = 0;
   for (let j = 1; j <= cr.entregas.length; j++) if (loteValido(c, ym, j)) n++;
-  return n ? { traficoMes: Math.round(cr.traficoHSem * finMes(ym) / 7 * 10) / 10, piezas: c.piezas, tandas: n, incluye: incluyeDe(c), asig: cr.asig, coautor: p2 && cr.coautorPiezas ? { nombre: p2.nombre, piezas: cr.coautorPiezas } : null } : null;
+  return n ? { grabHoras: cr.grabHoras, traficoMes: Math.round(cr.traficoHSem * finMes(ym) / 7 * 10) / 10, piezas: c.piezas, tandas: n, incluye: incluyeDe(c), asig: cr.asig, coautor: p2 && cr.coautorPiezas ? { nombre: p2.nombre, piezas: cr.coautorPiezas } : null } : null;
 }).filter(Boolean);
 const capacidadActual = ym => capacidadMes(ym, itemsCapacidad(ym), S.etapas, S.equipo, FER(), umbral(), ventanaDe(ym));
 // Las 3 fechas que ve el cliente: guiones, material (o grabación) y contenido editado (ya con el colchón)
@@ -714,7 +708,7 @@ function mensajeConFechas(c, f, ym) {
 }
 const mensajeCliente = (c, loteId) => mensajeConFechas(c, fechas3(c, loteId), loteId.slice(0, 7));
 // Fila completa del cronograma de un cliente (para guardar sin perder lo que ya tenía)
-const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { clienteId: id, entregas: r.entregas || '', aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: r.coautorPiezas || '', diasAprob: r.diasAprob || '', diasGrab: r.diasGrab || '', primeraEntrega: r.primeraEntrega || '', ultimaEntrega: r.ultimaEntrega || '', asignaciones: r.asignaciones || '', graba: r.graba || '', prioridad: r.prioridad || '', diaGuiones: r.diaGuiones || '', diaMaterial: r.diaMaterial || '', fechaOnboarding: r.fechaOnboarding || '', traficoHSem: r.traficoHSem || '' }; };
+const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) || {}; return { clienteId: id, entregas: r.entregas || '', aprobador: r.aprobador || '', notas: r.notas || '', coautor: r.coautor || '', coautorPiezas: r.coautorPiezas || '', diasAprob: r.diasAprob || '', diasGrab: r.diasGrab || '', primeraEntrega: r.primeraEntrega || '', ultimaEntrega: r.ultimaEntrega || '', asignaciones: r.asignaciones || '', graba: r.graba || '', prioridad: r.prioridad || '', diaGuiones: r.diaGuiones || '', diaMaterial: r.diaMaterial || '', fechaOnboarding: r.fechaOnboarding || '', traficoHSem: r.traficoHSem || '', grabHoras: r.grabHoras || '' }; };
 // Plan del mes: propone la entrega de cada cliente para que Juan Pablo edite en fila y todo quede listo antes del tope
 function planDelMes(ym) {
   const fer = FER(), tope = topeDe(ym), ls = lotes(S.tareas), excl = new Set(), items = [], fuera = [], clis = [];
@@ -729,7 +723,7 @@ function planDelMes(ym) {
   });
   const ocup = cargaDiaria(S.tareas.filter(t => !excl.has(t.clienteId + '|' + t.ciclo)), S.equipo, '0000-00-00', '9999-99-99', true);
   const plan = planificarCiclo(items, tope, reservaDias(), fer, ocup);
-  const cap = capacidadMes(ym, clis.map(c => { const cr = cronoDe(c.id), p2 = S.equipo.find(x => x.id === cr.coautor); return { traficoMes: Math.round(cr.traficoHSem * finMes(ym) / 7 * 10) / 10, piezas: c.piezas, tandas: 1, incluye: incluyeDe(c), asig: cr.asig, coautor: p2 && cr.coautorPiezas ? { nombre: p2.nombre, piezas: cr.coautorPiezas } : null }; }), S.etapas, S.equipo, fer, umbral(), ventanaDe(ym));
+  const cap = capacidadMes(ym, clis.map(c => { const cr = cronoDe(c.id), p2 = S.equipo.find(x => x.id === cr.coautor); return { grabHoras: cr.grabHoras, traficoMes: Math.round(cr.traficoHSem * finMes(ym) / 7 * 10) / 10, piezas: c.piezas, tandas: 1, incluye: incluyeDe(c), asig: cr.asig, coautor: p2 && cr.coautorPiezas ? { nombre: p2.nombre, piezas: cr.coautorPiezas } : null }; }), S.etapas, S.equipo, fer, umbral(), ventanaDe(ym));
   return { ym, tope, plan, fuera, cap, ventana: ventanaDe(ym) };
 }
 // ¿Alcanzan las 3 fechas que se pusieron? Compara con lo mínimo que necesita el sistema (días hábiles de cada tramo)
@@ -796,7 +790,7 @@ async function api(action, params) {
   const r = await fetch(u.toString());
   return r.json();
 }
-const APP_VERSION = '2026-10-28 · calendario Colombia, onboarding, grabación en paralelo y tráfico';
+const APP_VERSION = '2026-10-29 · sesión de grabación y plazos de aprobación';
 async function cargar() {
   setSync('sync', 'Sincronizando…');
   const r = await api('getAll');
@@ -1213,6 +1207,7 @@ function abrirFechas(id) {
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="l">Quién graba</label><select id="f-graba"><option value="" ' + (!cr.graba ? 'selected' : '') + '>Lo que diga el CRM</option><option value="cliente" ' + (cr.graba === 'cliente' ? 'selected' : '') + '>El cliente graba</option><option value="sinergia" ' + (cr.graba === 'sinergia' ? 'selected' : '') + '>Sinergia graba</option></select></div><div><label class="l">Prioridad en la cola de edición</label><input type="number" id="f-prio" min="1" value="' + (cr.prio || '') + '" placeholder="Automática"></div></div><div class="sub" style="margin-top:4px">Si el CRM dice que grabamos pero no es así (o al revés), corrígelo aquí. Prioridad: 1 edita primero; vacío = el que más edición lleva va primero.</div>' +
     '<label class="l">Quién hace qué en este cliente</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + selAsig('guion') + chkAsig('grabacion', 'Grabación (marca a todas las que van)') + chkAsig('onboarding', 'Onboarding (marca a todas las que van; vacío = lo que diga Ajustes)') + selAsig('edicion') + selAsig('calidad') + '</div><div class="sub" style="margin-top:4px">«Automático» usa a la primera persona con ese rol. Útil cuando hay un segundo editor o guionista.</div>' +
     '<label class="l">Otra persona que también escribe guiones de este cliente</label><div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><select id="f-coautor"><option value="">Nadie: los escribe quien tiene el rol</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.coautor === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select><input type="number" id="f-copz" min="0" value="' + (cr.coautorPiezas || '') + '" placeholder="Cuántos"></div><div class="sub" style="margin-top:4px">Por cada entrega: esa persona escribe ese número de guiones (en sus propias horas) y el resto, quien tiene el rol de guion.</div>' +
+    '<label class="l">Horas de la sesión de grabación (solo si Sinergia graba a este cliente)</label><input type="number" id="f-grab" min="0" step="0.5" value="' + (cr.grabHoras || '') + '" placeholder="vacío = lo de Ajustes → Etapas" style="width:220px"><div class="sub" style="margin-top:4px">Lo que dura la sesión con todas las personas a la vez: cada una carga con esas horas el mismo día. Ejemplo: 4 h con Alejandra y Evonny = 4 h para cada una.</div>' +
     '<label class="l">Horas de tráfico por semana (manejo de campañas de este cliente)</label><input type="number" id="f-trf" min="0" step="0.5" value="' + (cr.traficoHSem || '') + '" placeholder="Ej: 7" style="width:140px"><div class="sub" style="margin-top:4px">Cuenta en la carga de quien lleva el tráfico (Evonny) y en la alarma de contratación. Déjalo vacío si el cliente no tiene tráfico. Se cuenta aunque el CRM no marque tráfico.</div>' +
     '<label class="l">Quién aprueba de su lado</label><input id="f-aprob" value="' + esc(cr.aprobador) + '"><label class="l">Notas (canal de aprobación, horarios, cuándo graba…)</label><textarea id="f-notas" rows="2">' + esc(cr.notas) + '</textarea>' +
     '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="fechas-ok">Guardar</button></div>');
@@ -1264,7 +1259,7 @@ async function guardarFechas() {
   const pri = $('f-primera').value, ult = $('f-ultima').value;
   if (pri && ult && ult < pri) { alert('La última entrega no puede ser antes de la primera'); return; }
   const asg = ['guion', 'grabacion', 'onboarding', 'edicion', 'calidad'].map(r => { const v = (r === 'grabacion' || r === 'onboarding') ? Array.from(document.querySelectorAll('#f-asig-' + r + ' input:checked')).map(i => i.value).join('+') : $('f-asig-' + r).value; return v ? r + ':' + v : ''; }).filter(Boolean).join(',');
-  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim(), coautor: co && copz ? co : '', coautorPiezas: co && copz ? copz : '', diasAprob: parseInt($('f-dapr').value) || '', diasGrab: parseInt($('f-dgrab').value) || '', diaGuiones: dg || '', diaMaterial: dm_ || '', fechaOnboarding: $('f-onb').value, traficoHSem: parseFloat($('f-trf').value) || '', primeraEntrega: pri, ultimaEntrega: ult, asignaciones: asg, graba: $('f-graba').value, prioridad: parseInt($('f-prio').value) || '' };
+  const d = { clienteId: ctxCli, entregas: nums.join(','), aprobador: $('f-aprob').value.trim(), notas: $('f-notas').value.trim(), coautor: co && copz ? co : '', coautorPiezas: co && copz ? copz : '', diasAprob: parseInt($('f-dapr').value) || '', diasGrab: parseInt($('f-dgrab').value) || '', diaGuiones: dg || '', diaMaterial: dm_ || '', fechaOnboarding: $('f-onb').value, traficoHSem: parseFloat($('f-trf').value) || '', grabHoras: parseFloat($('f-grab').value) || '', primeraEntrega: pri, ultimaEntrega: ult, asignaciones: asg, graba: $('f-graba').value, prioridad: parseInt($('f-prio').value) || '' };
   closeModal(); loading(true, 'Guardando…');
   try { const r = await api('saveCronograma', { d }); if (!r.ok) throw new Error(r.error); await cargar(); render(); } catch (e) { alert('Error: ' + e.message); }
   loading(false);
@@ -1479,7 +1474,7 @@ function abrirGuia() {
     '<h4>Las 3 fechas del cliente</h4><p>Cuándo recibe los guiones, cuándo debe entregar el material grabado y cuándo recibe su contenido editado. La aprobación y las reglas (48 horas, un cambio por video, si el material llega tarde la entrega se mueve) van por escrito, no como fechas.</p>' +
     '<h4>El tope: «todo listo el 1»</h4><p>Se configura en Ajustes. Si el 1 cae domingo o feriado, el tope pasa al último día laborable anterior (ejemplo: el 1 de noviembre de 2026 es domingo y feriado: el tope es el sábado 31 de octubre). Antes del tope queda una <b>reserva</b> de días libres para atrasos.</p>' +
     '<h4>Casos especiales</h4><ul><li><b>Cliente nuevo</b>: en «Fechas y reglas», pon su <b>primera entrega</b>.</li><li><b>Cliente que no renueva</b>: pon su <b>última entrega</b>. Se libera su capacidad y su último lote lleva el cierre ordenado.</li><li><b>Quién graba</b>: se elige por cliente (hoy solo Elle la graba Sinergia).</li><li><b>Segundo editor o guionista</b>: asígnalo por cliente en «Quién hace qué».</li><li><b>Vacaciones</b>: Ajustes → Equipo → Ausencias.</li><li><b>Pedido extra</b>: botón «Lote extra».</li><li><b>Cliente que se atrasa</b>: «Retraso del cliente» mueve solo su lote.</li><li><b>Cliente pausado o terminado en el CRM</b>: Ajustes → «Clientes que ya no están activos».</li></ul>' +
-    '<h4>Capacidad</h4><p>La edición y la calidad solo cuentan el <b>tramo</b> del ciclo en que de verdad trabajan (desde que llega el primer material hasta el tope menos la reserva), no todo el mes. Por eso «piezas más que caben» es menor que antes.</p><h4>Grabar a un cliente</h4><p>Las horas de la etapa «Grabación» son <b>por video y por persona</b>. Si van dos, los videos se reparten y graban a la vez: 4 videos × 2 h = 2 videos y 4 h para cada una, y toma 4 h en total.</p><h4>Cuándo contratar</h4><p>En el Dashboard, «Capacidad y contratación» mira los próximos 3 ciclos: en amarillo conviene ir armando la búsqueda; en rojo ya no cabe un cliente típico o alguien pasa del 85%.</p><h4>Cliente nuevo</h4><p>La sesión de onboarding (2 h en total: 1 h cada una si van Alejandra y Evonny, a la vez) es una tarea del primer lote. Pon la <b>fecha del onboarding</b> en «Fechas y reglas»: desde ahí corre la investigación y se calcula su primera entrega.</p></div><div class="btns"><button class="btn p" data-act="cerrar">Entendido</button></div>');
+    '<h4>Capacidad</h4><p>La edición y la calidad solo cuentan el <b>tramo</b> del ciclo en que de verdad trabajan (desde que llega el primer material hasta el tope menos la reserva), no todo el mes. Por eso «piezas más que caben» es menor que antes.</p><h4>Grabar a un cliente</h4><p>Las horas de la etapa «Grabación» son lo que <b>dura la sesión</b>, con todas las personas a la vez: cada una que va carga esas horas el mismo día. Si un cliente necesita una sesión más larga o más corta, se cambia en su «Fechas y reglas».</p><h4>Cuándo contratar</h4><p>En el Dashboard, «Capacidad y contratación» mira los próximos 3 ciclos: en amarillo conviene ir armando la búsqueda; en rojo ya no cabe un cliente típico o alguien pasa del 85%.</p><h4>Cliente nuevo</h4><p>La sesión de onboarding (2 h en total: 1 h cada una si van Alejandra y Evonny, a la vez) es una tarea del primer lote. Pon la <b>fecha del onboarding</b> en «Fechas y reglas»: desde ahí corre la investigación y se calcula su primera entrega.</p></div><div class="btns"><button class="btn p" data-act="cerrar">Entendido</button></div>');
 }
 // ═════════ TAREA: EDITAR ═════════
 function openModal(html) { $('modal').innerHTML = html; $('overlay').classList.add('open'); }
