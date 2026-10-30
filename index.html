@@ -244,6 +244,23 @@ function bloque(horas, p, fin, fer, ocup) {
 // Reparte tareas (horas de cada una) entre los días del bloque, respetando lo que rinde la persona cada día.
 function repartir(horas, p, dias, fer, ocup) {
   if (!dias.length) return horas.map(() => null);
+  // Si no cabe en las horas libres del bloque, lo que sobra se reparte parejo entre esos días
+  // (según las horas de cada día) en vez de amontonarse en el último
+  const libre = dias.map(d => capDisp(p, d, fer, ocup)), total = horas.reduce((a, h) => a + h, 0), F = libre.reduce((a, x) => a + x, 0);
+  if (total > F + 1e-9) {
+    const cap = dias.map(d => horasDelDia(p, d, fer)), C = cap.reduce((a, x) => a + x, 0) || dias.length;
+    const extra = dias.map((d, i) => libre[i] + (total - F) * (C === dias.length && !cap.some(x => x) ? 1 : cap[i]) / C);
+    const out = []; let di = 0, rem = extra[0];
+    horas.forEach(h => {
+      let need = h;
+      while (need > 1e-9) {
+        if (rem <= 1e-9) { if (di < dias.length - 1) { di++; rem = extra[di]; } else rem = Infinity; }
+        const use = Math.min(need, rem); need -= use; rem -= use;
+      }
+      out.push(dias[di]);
+    });
+    return out;
+  }
   const out = []; let di = 0, rem = capDisp(p, dias[0], fer, ocup);
   horas.forEach(h => {
     let need = h;
@@ -319,7 +336,9 @@ function generarLote(o) {
     const alc = e.alcance || 'pieza', anc = e.ancla || 'entrega', horas = num(e.horas, 0), resp = asignar(e.rol, o.equipo, o.asig), desp = parseInt(e.offsetDias) || 0;
     if (alc === 'cliente' && !o.investigacion) return;
     if (alc === 'cierre' && !o.cierre) return;   // solo en la última entrega de un cliente que no renueva
-    const mk = (pieza, f, quien, sufijo, hh) => { if (f) out.push({ pieza: String(pieza), etapa: e.key, etapaNombre: e.nombre, fecha: f, responsable: quien || resp, horas: hh != null ? hh : horas, sufijo: sufijo || '' }); };
+    // Reuniones con el cliente (onboarding, reporte…): nunca en sábado; pasan al siguiente día hábil de semana
+    const reunion = e.key === 'onboarding' || /reuni/i.test(e.nombre || '');
+    const mk = (pieza, f, quien, sufijo, hh) => { if (f && reunion && parse(f).getDay() === 6) { f = addLab(f, 1, fer); while (parse(f).getDay() === 6) f = addLab(f, 1, fer); } if (f) out.push({ pieza: String(pieza), etapa: e.key, etapaNombre: e.nombre, fecha: f, responsable: quien || resp, horas: hh != null ? hh : horas, sufijo: sufijo || '' }); };
     if (alc === 'pieza') {
       const blk = { escritura: plan.wr, edicion: plan.ed, calidad: plan.qa }[anc];
       if (blk && anc === 'escritura' && co > 0 && plan.wr2) {
