@@ -1252,17 +1252,35 @@ function filaPieza(r) {
     (qa && items.length ? '<div class="row" style="margin-top:8px;gap:14px">' + items.map(it => '<label class="chk"><input type="checkbox" data-chk="' + esc(p.calidad.id) + '" value="' + esc(it) + '" ' + (marcados(p.calidad).includes(it) ? 'checked' : '') + '> ' + esc(it) + '</label>').join('') + '</div>' : '') +
     (notas ? '<div class="sub" style="margin-top:6px">Notas: ' + esc(notas) + '</div>' : '') + '</div>';
 }
+// Piezas = seguimiento (para mirar): un resumen por lote con en qué fase está cada video. Se trabaja en «Mis tareas».
+const lotesAbiertos = new Set();
+function resumenLote(l) {
+  const pz = Object.keys(l.piezas).sort((a, b) => a - b), fs = pz.map(k => ({ pz: k, p: l.piezas[k], f: faseDe(l.piezas[k], l.lote) }));
+  const cuenta = {}; fs.forEach(x => { cuenta[x.f] = (cuenta[x.f] || 0) + 1; });
+  const aprob = (cuenta['Aprobado por el cliente'] || 0) + (cuenta['Completada'] || 0), abierto = lotesAbiertos.has(l.clienteId + '|' + l.ciclo), ent = fechaEntrega(l);
+  return '<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><b style="font-size:15px">' + esc(l.cliente) + '</b> · ' + esc(loteLabel(l)) + ' · ' + fs.length + ' pieza' + (fs.length === 1 ? '' : 's') +
+    '<br><span class="sub">' + (ent ? 'Entrega el ' + corta(ent) + ' · ' : '') + aprob + ' de ' + fs.length + ' aprobadas por el cliente</span>' +
+    '<div class="prog" style="max-width:320px"><i style="width:' + Math.round(aprob / Math.max(1, fs.length) * 100) + '%"></i></div></div>' +
+    '<button class="btn sm" data-act="lote-ver" data-k="' + esc(l.clienteId + '|' + l.ciclo) + '">' + (abierto ? 'Ocultar piezas' : 'Ver piezas') + '</button></div>' +
+    '<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">' + FASES.filter(f => cuenta[f]).map(f => '<span class="badge b-' + (FASE_CLASE[f] || 'pend') + '">' + esc(f) + ' · ' + cuenta[f] + '</span>').join('') + '</div>' +
+    (abierto ? '<div class="gsub" style="margin-top:10px"><p class="sub" style="margin:0 0 4px">Para casos puntuales. Lo normal es marcar por grupo en <b>Mis tareas</b>.</p>' + fs.map(x => filaPieza({ l, pz: x.pz, p: x.p, f: x.f })).join('') + '</div>' : '') + '</div>';
+}
 function vPiezas() {
   const ls = lotes(S.tareas).filter(l => !pCli || l.clienteId === pCli).sort((a, b) => fechaEntrega(a).localeCompare(fechaEntrega(b)));
   const cuenta = {}, filas = [];
   ls.forEach(l => Object.keys(l.piezas).sort((a, b) => a - b).forEach(pz => { const p = l.piezas[pz], f = faseDe(p, l.lote); cuenta[f] = (cuenta[f] || 0) + 1; filas.push({ l, pz, p, f }); }));
-  const vis = filas.filter(r => pFase ? r.f === pFase : !['Completada', 'Aprobado por el cliente'].includes(r.f));
   let h = '<div class="head"><h2>Piezas</h2><div class="row"><select data-filter="pc"><option value="">Todos los clientes</option>' + activos().map(c => '<option value="' + esc(c.id) + '" ' + (pCli === c.id ? 'selected' : '') + '>' + esc(c.nombre) + '</option>').join('') + '</select></div></div>';
   if (!filas.length) return h + '<div class="empty">Aún no hay piezas. Genera el lote de un cliente en <b>Clientes</b>.</div>';
+  h += '<p class="sub" style="margin-bottom:10px">Aquí se mira cómo va cada cliente. Las tareas se marcan en <b>Mis tareas</b>; desde aquí solo las respuestas del cliente.</p>';
   h += cardRespuestas();
-  h += '<div class="phase-chips" style="margin-bottom:12px"><button class="pchip ' + (!pFase ? 'on' : '') + '" data-act="fase" data-f="">En curso</button>' + FASES.filter(f => cuenta[f]).map(f => '<button class="pchip ' + (pFase === f ? 'on' : '') + '" data-act="fase" data-f="' + esc(f) + '">' + esc(f) + ' · ' + cuenta[f] + '</button>').join('') + '</div>';
-  h += '<div class="card">' + (vis.length ? vis.slice(0, 80).map(filaPieza).join('') + (vis.length > 80 ? '<div class="sub" style="padding-top:8px">Mostrando 80 de ' + vis.length + '. Filtra por cliente o por fase.</div>' : '') : '<div class="empty">No hay piezas en esta fase</div>') + '</div>';
-  return h;
+  h += '<div class="phase-chips" style="margin-bottom:12px"><button class="pchip ' + (!pFase ? 'on' : '') + '" data-act="fase" data-f="">Resumen por cliente</button>' + FASES.filter(f => cuenta[f]).map(f => '<button class="pchip ' + (pFase === f ? 'on' : '') + '" data-act="fase" data-f="' + esc(f) + '">' + esc(f) + ' · ' + cuenta[f] + '</button>').join('') + '</div>';
+  if (pFase) {
+    const vis = filas.filter(r => r.f === pFase);
+    return h + '<div class="card">' + (vis.length ? vis.slice(0, 80).map(filaPieza).join('') + (vis.length > 80 ? '<div class="sub" style="padding-top:8px">Mostrando 80 de ' + vis.length + '. Filtra por cliente.</div>' : '') : '<div class="empty">No hay piezas en esta fase</div>') + '</div>';
+  }
+  // Lotes en curso (o terminados hace poco)
+  const vivos = ls.filter(l => Object.values(l.piezas).some(p => !['Completada', 'Aprobado por el cliente'].includes(faseDe(p, l.lote))) || fechaEntrega(l) >= addDays(S.hoy, -20));
+  return h + (vivos.length ? vivos.map(resumenLote).join('') : '<div class="empty">No hay lotes en curso</div>');
 }
 
 // ═════════ CARGA ═════════
@@ -1811,6 +1829,7 @@ document.addEventListener('click', e => {
   else if (a === 'irFase') { view = 'piezas'; pFase = d.f; render(); window.scrollTo(0, 0); }
   else if (a === 'irPiezas') { view = 'piezas'; render(); window.scrollTo(0, 0); }
   else if (a === 'fase') { pFase = d.f; render(); }
+  else if (a === 'lote-ver') { if (lotesAbiertos.has(d.k)) lotesAbiertos.delete(d.k); else lotesAbiertos.add(d.k); render(); }
   else if (a === 'tarea') abrirTarea(id);
   else if (a === 'cerrar') closeModal();
   else if (a === 'guardar-tarea') guardarTarea(id);
