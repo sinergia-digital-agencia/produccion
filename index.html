@@ -73,6 +73,13 @@ label.l{display:block;font-size:12px;font-weight:600;color:var(--text2);margin:1
 .check-grid label{display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--rs);font-size:13px;cursor:pointer}
 .check-grid label input{width:16px;height:16px;padding:0;accent-color:var(--vino)}
 .chk{display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
+.pick{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.pick label{display:inline-flex;align-items:center;gap:5px;min-width:44px;justify-content:center;border:1px solid var(--vino);border-radius:var(--rs);padding:6px 9px;font-size:13px;font-weight:600;cursor:pointer;background:var(--vino-light);color:var(--vino);user-select:none}
+.pick label.off{background:#fff;border:1px dashed var(--terra);color:var(--terra);text-decoration:line-through}
+.pick label.dis{background:var(--surface2);border:1px solid var(--border);color:var(--text3);cursor:not-allowed;text-decoration:none}
+.pick input{width:auto;margin:0;accent-color:var(--vino)}
+.gfila{border-bottom:1px solid var(--border);padding:10px 0}
+.gsub{border-left:3px solid var(--lila);margin:8px 0 0 4px;padding-left:10px}
 .chk input{width:16px;height:16px;padding:0;accent-color:var(--vino)}
 .modal .chk input{width:16px}
 .prog{height:6px;background:var(--border);border-radius:4px;overflow:hidden;margin:8px 0}
@@ -348,7 +355,7 @@ const fechasCliente = p => ({ guiones: p.envio, aprueba: p.aprueba, graba: p.gra
 const entregaDelMes = (ym, dia) => ym + '-' + pad(Math.min(Math.max(1, parseInt(dia) || 1), finMes(ym)));
 
 // ── Carga por día y por persona (horas) ──
-function cargaDiaria(tareas, equipo, desde, hasta, soloPend) {
+function cargaDiaria(tareas, equipo, desde, hasta, soloPend, sinReserva) {
   const m = {}; equipo.filter(p => p.activo !== 'NO').forEach(p => { m[p.nombre] = {}; });
   tareas.forEach(t => {
     const h = num(t.horas, 0); if (!h || !t.responsable || t.responsable === 'Cliente') return;
@@ -356,6 +363,29 @@ function cargaDiaria(tareas, equipo, desde, hasta, soloPend) {
     if (t.fecha < desde || t.fecha > hasta) return;
     const x = (m[t.responsable] = m[t.responsable] || {}); x[t.fecha] = (x[t.fecha] || 0) + h;
   });
+  if (!sinReserva) sumarReservaTrafico(m, equipo, desde, hasta);
+  return m;
+}
+// ── Reserva diaria del tráfico: las «horas de tráfico por semana» de cada cliente se apartan cada día laborable
+// de quien lleva el tráfico (proporcional a sus horas del día; el sábado, menos). No son tareas: es tiempo ocupado.
+function traficoSemanal(equipo, f) {
+  const r = {}; if (typeof S === 'undefined' || !S.cronograma) return r;
+  activos().forEach(c => {
+    const cr = cronoDe(c.id); if (!(cr.traficoHSem > 0)) return;
+    if ((cr.primera && f < cr.primera.slice(0, 7) + '-01') || (cr.ultima && f > cr.ultima)) return;
+    const ps = personasDe('trafico', equipo, cr.asig); ps.forEach(p => { r[p.nombre] = (r[p.nombre] || 0) + cr.traficoHSem / ps.length; });
+  });
+  return r;
+}
+function reservaDia(p, f, fer, sem) { const cap = horasDelDia(p, f, fer), base = capSemNom(p); return cap && base && sem ? Math.min(cap, sem * cap / base) : 0; }
+function sumarReservaTrafico(m, equipo, desde, hasta) {
+  if (typeof S === 'undefined' || !S.hoy) return m;
+  const fer = FER(), a = desde > addDays(S.hoy, -62) ? desde : addDays(S.hoy, -62), b = hasta < addDays(S.hoy, 400) ? hasta : addDays(S.hoy, 400);
+  let sem = null, mesSem = '';
+  for (let f = a; f <= b; f = addDays(f, 1)) {
+    if (f.slice(0, 7) !== mesSem) { sem = traficoSemanal(equipo, f); mesSem = f.slice(0, 7); }
+    Object.keys(sem).forEach(n => { const p = equipo.find(x => x.nombre === n); const h = reservaDia(p, f, fer, sem[n]); if (h) { const x = (m[n] = m[n] || {}); x[f] = (x[f] || 0) + h; } });
+  }
   return m;
 }
 // Un día solo cuenta como sobrecarga si se pasa más de un 10 % (los cierres de 15 minutos no cuentan)
@@ -407,7 +437,7 @@ function evaluarEntrega(o) {
   const tasks = generarLote({ entrega: o.entrega, tanda: 1, tandas: 1, piezas: o.piezas, incluye: o.incluye, etapas: o.etapas, equipo: o.equipo, fer: o.fer, diasAprob: o.diasAprob, diasGrab: o.diasGrab, investigacion: !!o.investigacion, asig: o.asig, fechaOnb: o.fechaOnb, invDias: o.invDias, ocup });
   if (!tasks.length) return null;
   const fs_ = tasks.map(t => t.fecha).sort(), desde = fs_[0], hasta = fs_[fs_.length - 1];
-  const base = ocup, add = cargaDiaria(tasks, o.equipo, desde, hasta, false);
+  const base = ocup, add = cargaDiaria(tasks, o.equipo, desde, hasta, false, true);
   let pico = { ratio: 0 };
   Object.keys(add).forEach(n => { const p = o.equipo.find(x => x.nombre === n); Object.keys(add[n]).forEach(f => { const cap = horasDelDia(p, f, o.fer), tot = ((base[n] || {})[f] || 0) + add[n][f], r = cap ? tot / cap : 99; if (r > pico.ratio) pico = { persona: n, fecha: f, horas: Math.round(tot * 100) / 100, cap, ratio: r }; }); });
   // Si para cumplir la fecha habría que haber empezado antes de hoy, no cabe
@@ -803,7 +833,7 @@ async function api(action, params) {
   const r = await fetch(u.toString());
   return r.json();
 }
-const APP_VERSION = '2026-10-30 · plan por ciclo desde el CRM';
+const APP_VERSION = '2026-10-30 · marcar piezas por grupo';
 async function cargar() {
   setSync('sync', 'Sincronizando…');
   const r = await api('getAll');
@@ -982,9 +1012,11 @@ function vTablero() {
   const tareas = S.tareas.concat(ym >= hm ? proyeccion(ym, ym) : []);
   const carga = cargaDiaria(tareas, S.equipo, ym + '-01', ym + '-' + pad(n), false), det = {};
   tareas.forEach(t => { if (!t.responsable || t.responsable === 'Cliente' || !num(t.horas, 0) || t.fecha.slice(0, 7) !== ym) return; const k = t.responsable + '|' + t.fecha, nm = t.cliente.split(' - ')[0] + ' · ' + t.etapaNombre.split(' (')[0]; (det[k] = det[k] || {})[nm] = (det[k][nm] || 0) + 1; });
+  const resTr = sumarReservaTrafico({}, S.equipo, ym + '-01', ym + '-' + pad(n));
+  Object.keys(resTr).forEach(nm => Object.keys(resTr[nm]).forEach(f => { (det[nm + '|' + f] = det[nm + '|' + f] || {})['tráfico ' + Math.round(resTr[nm][f] * 10) / 10 + ' h'] = 1; }));
   const gente = S.equipo.filter(p => p.activo !== 'NO' && num(p.horasDia, 8) > 0);
   let h = '<div class="head"><h2>Tablero · ' + mesLabel(ym) + '</h2><div class="row"><button class="btn sm" data-act="mes" data-d="-1"><i class="ti ti-chevron-left"></i></button><button class="btn sm" data-act="mes" data-d="0">Este mes</button><button class="btn sm" data-act="mes" data-d="1"><i class="ti ti-chevron-right"></i></button></div></div>';
-  h += '<p class="sub" style="margin-bottom:10px">Cada celda son las horas de trabajo planificadas de esa persona ese día frente a las horas que tiene (lunes a viernes y sábado hasta el mediodía; sin domingos ni feriados). <span class="badge cg-ok">dentro de sus horas</span> <span class="badge cg-warn">un poco justo</span> <span class="badge cg-over">no alcanza</span>' + (ym >= hm ? ' Incluye lo que ya está comprometido aunque todavía no hayas generado el lote.' : '') + '</p>';
+  h += '<p class="sub" style="margin-bottom:10px">Cada celda son las horas de trabajo planificadas de esa persona ese día frente a las horas que tiene (lunes a viernes y sábado hasta el mediodía; sin domingos ni feriados). <span class="badge cg-ok">dentro de sus horas</span> <span class="badge cg-warn">un poco justo</span> <span class="badge cg-over">no alcanza</span>' + (ym >= hm ? ' Incluye lo que ya está comprometido aunque todavía no hayas generado el lote.' : '') + ' A quien lleva el tráfico se le reservan cada día sus horas de tráfico.</p>';
   h += '<div class="card"><div class="scroll"><table class="heat"><thead><tr><th class="who"></th>' + Array.from({ length: n }, (_, i) => { const f = ym + '-' + pad(i + 1), w = parse(f).getDay(); return '<th class="' + (!esLab(f, fer) ? 'off' : '') + (f === S.hoy ? ' hoy' : '') + '">' + 'DLMMJVS'[w] + '<br>' + (i + 1) + '</th>'; }).join('') + '<th>Horas</th></tr></thead><tbody>' +
     gente.map(p => {
       let tot = 0;
@@ -1022,6 +1054,17 @@ function filtrar(t) {
 function cardTarea(t, late) {
   return '<div class="task t-' + SLUG[t.estado] + (late ? ' late' : '') + '" data-act="tarea" data-id="' + esc(t.id) + '"><b>' + esc(t.cliente) + '</b><span>' + (t.pieza === '0' ? 'Lote' : 'Pieza ' + esc(t.pieza)) + ' · ' + esc(t.etapaNombre) + '</span><span>' + esc(t.responsable || 'Sin asignar') + ' · ' + esc(t.estado) + '</span></div>';
 }
+// En el calendario, varias piezas del mismo cliente, etapa y persona en un día se muestran en una sola tarjeta
+function cardsDia(dt) {
+  const m = {}, out = [];
+  dt.forEach(t => { if (t.pieza === '0') { out.push(t); return; } const k = t.clienteId + '|' + t.ciclo + '|' + t.etapa + '|' + t.responsable; if (!m[k]) { m[k] = []; out.push(m[k]); } m[k].push(t); });
+  return out.map(x => {
+    if (!Array.isArray(x)) return cardTarea(x, false);
+    if (x.length === 1) return cardTarea(x[0], false);
+    const t = x[0], hechas = x.filter(y => y.estado === 'Listo').length, est = hechas === x.length ? 'Listo' : (x.some(y => y.estado === 'Con cambios') ? 'Con cambios' : (x.some(y => y.estado === 'En curso') ? 'En curso' : 'Pendiente'));
+    return '<div class="task t-' + SLUG[est] + '" data-act="grupo" data-k="' + esc(t.clienteId + '|' + t.ciclo + '|' + t.etapa) + '" data-r="' + esc(t.responsable) + '"><b>' + esc(t.cliente) + '</b><span>' + esc(String(t.etapaNombre).split(' (')[0]) + ' · ' + x.length + ' piezas (' + x.map(y => y.pieza).join(', ') + ')</span><span>' + esc(t.responsable || 'Sin asignar') + ' · ' + hechas + ' de ' + x.length + ' listas</span></div>';
+  }).join('');
+}
 function selFiltros() {
   const personas = S.equipo.filter(p => p.activo !== 'NO').map(p => p.nombre).concat(['Cliente', 'Sin asignar']);
   return '<select data-filter="p"><option value="">Todas las personas</option>' + personas.map(p => '<option ' + (fP === p ? 'selected' : '') + '>' + esc(p) + '</option>').join('') + '</select>' +
@@ -1036,10 +1079,64 @@ function vCalendario() {
   if (atras.length) h += '<div class="alert r"><b>' + atras.length + ' tarea' + (atras.length > 1 ? 's' : '') + ' atrasada' + (atras.length > 1 ? 's' : '') + '</b> (en rojo)</div><div class="card">' + atras.slice(0, 12).map(t => '<div style="margin-bottom:4px">' + cardTarea(t, true) + '<span class="sub">Vencía el ' + corta(t.fecha) + '</span></div>').join('') + (atras.length > 12 ? '<div class="sub">+ ' + (atras.length - 12) + ' más…</div>' : '') + '</div>';
   h += '<div class="week">' + dias.map(d => {
     const w = parse(d).getDay(), dt = ts.filter(t => t.fecha === d).sort((a, b) => a.cliente.localeCompare(b.cliente) || a.pieza - b.pieza);
-    return '<div class="day ' + (d === S.hoy ? 'hoy ' : '') + (w === 0 || w === 6 ? 'we' : '') + '"><h4>' + corta(d) + (d === S.hoy ? ' · hoy' : '') + '</h4>' + (dt.length ? dt.map(t => cardTarea(t, false)).join('') : '<div class="sub">—</div>') + '</div>';
+    return '<div class="day ' + (d === S.hoy ? 'hoy ' : '') + (w === 0 || w === 6 ? 'we' : '') + '"><h4>' + corta(d) + (d === S.hoy ? ' · hoy' : '') + '</h4>' + (dt.length ? cardsDia(dt) : '<div class="sub">—</div>') + '</div>';
   }).join('') + '</div>';
   return h;
 }
+
+// ═════════ MIS TAREAS ═════════
+// Una fila por tarea suelta (o por pieza cuando se despliega un grupo)
+function filaTarea(t) {
+  return '<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--border);padding:8px 0"><div><b>' + esc(t.cliente) + '</b> · ' + (t.pieza === '0' ? 'Lote' : 'Pieza ' + esc(t.pieza)) + ' · ' + esc(t.etapaNombre) + '<br><span class="sub">' + corta(t.fecha) + ' · <span class="badge b-' + SLUG[t.estado] + '">' + esc(t.estado) + '</span>' + (t.notas ? ' · ' + esc(t.notas) : '') + '</span></div><div class="row">' +
+    (t.etapa === 'calidad' ? '<button class="btn sm p" data-act="irPiezas">Revisar</button>' : (t.estado !== 'En curso' ? '<button class="btn sm" data-act="rapido" data-id="' + esc(t.id) + '" data-e="En curso">Empezar</button>' : '') + '<button class="btn sm p" data-act="rapido" data-id="' + esc(t.id) + '" data-e="Listo"><i class="ti ti-check"></i>Listo</button>') +
+    '<button class="btn sm" data-act="tarea" data-id="' + esc(t.id) + '">Abrir</button></div></div>';
+}
+// Una fila por cliente + etapa: se marcan todas de una y solo se desmarcan las que faltan
+function filaGrupo(g) {
+  const l = lotes(S.tareas).find(x => x.clienteId === g.clienteId && x.ciclo === g.ciclo), resp = g.tareas[0].responsable;
+  const todas = l ? Object.values(l.piezas).map(p => p[g.etapa]).filter(t => t && t.responsable === resp) : g.tareas;
+  const hechas = todas.filter(t => t.estado === 'Listo').length, cc = g.tareas.filter(t => t.estado === 'Con cambios').length, abierto = gruposAbiertos.has(g.key + '|' + resp);
+  const faltan = hechas ? g.tareas.map(t => t.pieza) : [];
+  return '<div class="gfila"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><b>' + esc(g.cliente) + '</b> · ' + esc(g.nombre) + ' · ' + g.tareas.length + ' pieza' + (g.tareas.length === 1 ? '' : 's') +
+    '<br><span class="sub">' + (g.fecha === g.fin ? corta(g.fecha) : dm(g.fecha) + ' – ' + dm(g.fin)) + ' · ' + hechas + ' de ' + todas.length + ' listas' + (cc ? ' · <span class="badge b-cambios">' + cc + ' con cambios</span>' : '') + (faltan.length && faltan.length <= 8 ? ' · faltan: ' + faltan.join(', ') : '') + '</span>' +
+    '<div class="prog" style="max-width:260px"><i style="width:' + Math.round(hechas / Math.max(1, todas.length) * 100) + '%"></i></div></div>' +
+    '<div class="row"><button class="btn sm p" data-act="grupo" data-k="' + esc(g.key) + '" data-r="' + esc(resp) + '"><i class="ti ti-checks"></i>' + (g.etapa === 'calidad' ? 'Revisar' : 'Marcar listas') + '</button><button class="btn sm" data-act="grupo-ver" data-k="' + esc(g.key + '|' + resp) + '">' + (abierto ? 'Ocultar piezas' : 'Ver piezas') + '</button></div></div>' +
+    (abierto ? '<div class="gsub">' + g.tareas.map(filaTarea).join('') + '</div>' : '') + '</div>';
+}
+const gruposAbiertos = new Set();
+// Tareas por pieza del mismo lote y etapa → un grupo; las de lote (o una sola pieza) quedan sueltas
+function agruparTareas(ts) {
+  const m = {}, out = [];
+  ts.forEach(t => {
+    if (t.pieza === '0') { out.push({ suelta: t, fecha: t.fecha }); return; }
+    const k = t.clienteId + '|' + t.ciclo + '|' + t.etapa;
+    if (!m[k]) { m[k] = { key: k, clienteId: t.clienteId, cliente: t.cliente, ciclo: t.ciclo, etapa: t.etapa, nombre: String(t.etapaNombre || t.etapa).split(' (')[0], tareas: [] }; out.push(m[k]); }
+    m[k].tareas.push(t);
+  });
+  return out.map(g => {
+    if (!g.tareas) return g;
+    if (g.tareas.length === 1) return { suelta: g.tareas[0], fecha: g.tareas[0].fecha };
+    g.tareas.sort((a, b) => (+a.pieza) - (+b.pieza)); const f = g.tareas.map(t => t.fecha).sort(); g.fecha = f[0]; g.fin = f[f.length - 1]; return g;
+  }).sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.suelta ? a.suelta.cliente : a.cliente).localeCompare(b.suelta ? b.suelta.cliente : b.cliente));
+}
+// ── Respuestas del cliente: guiones enviados y videos en revisión, por lote
+function respuestasPendientes() {
+  const out = [];
+  lotes(S.tareas).forEach(l => {
+    const pz = Object.keys(l.piezas).sort((a, b) => a - b), gu = [], vi = [];
+    pz.forEach(k => { const p = l.piezas[k], f = faseDe(p, l.lote); if (f === 'Guion en revisión del cliente' && p.guion) gu.push(k); if ((f === 'En revisión del cliente' || f === 'Reenviado a revisión') && p.revvideo && (!l.lote.entrega || l.lote.entrega.estado === 'Listo' || p.revvideo.estado === 'En revisión')) vi.push(k); });
+    if (gu.length && l.lote.envioguion && l.lote.envioguion.estado === 'Listo') out.push({ l, tipo: 'guion', piezas: gu });
+    if (vi.length) out.push({ l, tipo: 'video', piezas: vi });
+  });
+  return out;
+}
+function cardRespuestas() {
+  const rs = respuestasPendientes(); if (!rs.length) return '';
+  return '<div class="card"><h4 style="margin-bottom:4px">Esperando respuesta del cliente (' + rs.length + ')</h4><p class="sub" style="margin-bottom:6px">Cuando el cliente responda, marca todo de una y desmarca solo lo que pidió cambiar.</p>' + rs.map(r =>
+    '<div class="row gfila" style="justify-content:space-between"><div><b>' + esc(r.l.cliente) + '</b> · ' + (r.tipo === 'guion' ? r.piezas.length + ' guion' + (r.piezas.length === 1 ? '' : 'es') + ' enviado' + (r.piezas.length === 1 ? '' : 's') : r.piezas.length + ' video' + (r.piezas.length === 1 ? '' : 's') + ' en revisión') + '<br><span class="sub">' + esc(loteLabel(r.l)) + '</span></div>' +
+    '<button class="btn sm p" data-act="respuesta" data-cid="' + esc(r.l.clienteId) + '" data-ciclo="' + esc(r.l.ciclo) + '" data-t="' + r.tipo + '"><i class="ti ti-message-check"></i>El cliente respondió</button></div>').join('') + '</div>';
+}
+const veRespuestas = () => { const p = persona(YO); if (!p) return true; const rs = String(p.roles || '').split(',').map(x => x.trim()).filter(Boolean); return !(rs.length && rs.every(r => r === 'edicion')); };
 
 // ═════════ MIS TAREAS ═════════
 function vMis() {
@@ -1048,18 +1145,91 @@ function vMis() {
   if (!YO) return h + '<div class="empty">Elige tu nombre para ver solo lo que te toca a ti. Se acuerda en este dispositivo.</div>';
   const mine = S.tareas.filter(t => t.responsable === YO && t.estado !== 'Listo').sort((a, b) => a.fecha.localeCompare(b.fecha) || a.cliente.localeCompare(b.cliente));
   const finSem = addDays(lunes(S.hoy), 7), fin3 = addDays(lunes(S.hoy), 28);
-  const grupos = [['Atrasadas', mine.filter(t => t.fecha < S.hoy)], ['Esta semana', mine.filter(t => t.fecha >= S.hoy && t.fecha < finSem)], ['Próximas 3 semanas', mine.filter(t => t.fecha >= finSem && t.fecha < fin3)]];
+  const items = agruparTareas(mine).filter(g => g.fecha < fin3);   // el grupo entra completo si empieza dentro de las 3 semanas
+  const grupos = [['Atrasadas', items.filter(g => g.fecha < S.hoy)], ['Esta semana', items.filter(g => g.fecha >= S.hoy && g.fecha < finSem)], ['Próximas 3 semanas', items.filter(g => g.fecha >= finSem && g.fecha < fin3)]];
   const horas = Math.round(mine.reduce((a, t) => a + (parseFloat(t.horas) || 0), 0) * 10) / 10, cap = persona(YO) ? capSemNom(persona(YO)) : 0;
-  h += '<div class="alert i">' + mine.length + ' tarea' + (mine.length === 1 ? '' : 's') + ' pendiente' + (mine.length === 1 ? '' : 's') + ' · ' + horas + ' h estimadas' + (cap ? ' · tienes ' + cap + ' h por semana (L–V ' + num(persona(YO).horasDia, 8) + ' h, sáb ' + num(persona(YO).horasSab, 4) + ' h)' : '') + '</div>';
+  const trSem = Math.round((traficoSemanal(S.equipo, S.hoy)[YO] || 0) * 10) / 10;
+  h += '<div class="alert i">' + mine.length + ' tarea' + (mine.length === 1 ? '' : 's') + ' pendiente' + (mine.length === 1 ? '' : 's') + ' · ' + horas + ' h estimadas' + (cap ? ' · tienes ' + cap + ' h por semana (L–V ' + num(persona(YO).horasDia, 8) + ' h, sáb ' + num(persona(YO).horasSab, 4) + ' h)' : '') + (trSem ? ', de las que ' + trSem + ' h están reservadas para tráfico' : '') + '</div>';
+  if (veRespuestas()) h += cardRespuestas();
   grupos.forEach(g => {
     if (!g[1].length) return;
-    h += '<div class="card"><h4 style="margin-bottom:8px">' + g[0] + ' (' + g[1].length + ')</h4>' + g[1].map(t =>
-      '<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--border);padding:8px 0"><div><b>' + esc(t.cliente) + '</b> · ' + (t.pieza === '0' ? 'Lote' : 'Pieza ' + esc(t.pieza)) + ' · ' + esc(t.etapaNombre) + '<br><span class="sub">' + corta(t.fecha) + ' · <span class="badge b-' + SLUG[t.estado] + '">' + esc(t.estado) + '</span>' + (t.notas ? ' · ' + esc(t.notas) : '') + '</span></div><div class="row">' +
-      (t.etapa === 'calidad' ? '<button class="btn sm p" data-act="irPiezas">Revisar</button>' : (t.estado !== 'En curso' ? '<button class="btn sm" data-act="rapido" data-id="' + esc(t.id) + '" data-e="En curso">Empezar</button>' : '') + '<button class="btn sm p" data-act="rapido" data-id="' + esc(t.id) + '" data-e="Listo"><i class="ti ti-check"></i>Listo</button>') +
-      '<button class="btn sm" data-act="tarea" data-id="' + esc(t.id) + '">Abrir</button></div></div>').join('') + '</div>';
+    const n = g[1].reduce((a, x) => a + (x.suelta ? 1 : x.tareas.length), 0);
+    h += '<div class="card"><h4 style="margin-bottom:8px">' + g[0] + ' (' + n + ')</h4>' + g[1].map(x => x.suelta ? filaTarea(x.suelta) : filaGrupo(x)).join('') + '</div>';
   });
   if (!mine.length) h += '<div class="empty">No tienes tareas pendientes 🎉</div>';
   return h;
+}
+
+// ═════════ MARCAR VARIAS PIEZAS DE UNA ═════════
+let grupoCtx = null;
+const pickHTML = (lista, marcada, deshab) => '<div class="pick" id="g-pick">' + lista.map(x => { const d = deshab && deshab(x); return '<label class="' + (d ? 'dis' : (marcada(x) ? '' : 'off')) + '"' + (d ? ' title="' + esc(d) + '"' : '') + '><input type="checkbox" value="' + esc(x.pz) + '"' + (!d && marcada(x) ? ' checked' : '') + (d ? ' disabled' : '') + '>' + esc(x.pz) + '</label>'; }).join('') + '</div>' +
+  '<div class="row" style="gap:6px;margin-bottom:6px"><button class="btn sm" data-act="pick-todas" data-v="1">Marcar todas</button><button class="btn sm" data-act="pick-todas" data-v="0">Desmarcar todas</button></div>';
+const pickValores = () => Array.from(document.querySelectorAll('#g-pick input')).filter(i => !i.disabled).map(i => ({ pz: i.value, ok: i.checked }));
+function abrirGrupo(key, resp) {
+  const [cid, ciclo, etapa] = key.split('|'), l = lotes(S.tareas).find(x => x.clienteId === cid && x.ciclo === ciclo); if (!l) return;
+  const lista = Object.keys(l.piezas).sort((a, b) => a - b).map(pz => ({ pz, p: l.piezas[pz], t: l.piezas[pz][etapa] })).filter(x => x.t && x.t.estado !== 'Listo' && (!resp || x.t.responsable === resp));
+  if (!lista.length) { alert('No quedan piezas pendientes en este grupo.'); return; }
+  const qa = etapa === 'calidad', nombre = String(lista[0].t.etapaNombre).split(' (')[0];
+  grupoCtx = { tipo: qa ? 'calidad' : 'etapa', cid, ciclo, etapa, lista };
+  const noLista = x => qa && x.p.edicion && x.p.edicion.estado !== 'Listo' ? 'Aún en edición' : '';
+  openModal('<h3>' + esc(nombre) + ' · ' + esc(l.cliente) + '</h3><div class="sub">' + esc(loteLabel(l)) + ' · ' + lista.length + ' pendiente' + (lista.length === 1 ? '' : 's') + '</div>' +
+    '<p style="margin-top:10px">' + (qa ? 'Las marcadas quedan <b>aprobadas</b> (con el checklist completo). Desmarca las que no pasan.' : 'Las marcadas quedan <b>listas</b>. Desmarca solo las que faltan.') + '</p>' +
+    pickHTML(lista, x => !noLista(x), noLista) +
+    (qa ? '<label class="l">Las desmarcadas</label><select id="g-modo"><option value="nada">Aún no las reviso</option><option value="cambios">Necesitan corrección (vuelven a edición)</option></select><label class="l">¿Qué hay que corregir? (se anota en cada una)</label><textarea id="g-nota" rows="2"></textarea>' : '') +
+    '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="grupo-ok"><i class="ti ti-check"></i>Guardar</button></div>');
+}
+function abrirRespuesta(cid, ciclo, tipo) {
+  const r = respuestasPendientes().find(x => x.l.clienteId === cid && x.l.ciclo === ciclo && x.tipo === tipo); if (!r) return;
+  const lista = r.piezas.map(pz => ({ pz, p: r.l.piezas[pz] })), g = tipo === 'guion';
+  grupoCtx = { tipo: g ? 'resp-guion' : 'resp-video', cid, ciclo, lista, l: r.l };
+  openModal('<h3>Respuesta del cliente · ' + esc(r.l.cliente) + '</h3><div class="sub">' + esc(loteLabel(r.l)) + ' · ' + (g ? 'guiones' : 'videos') + '</div>' +
+    '<p style="margin-top:10px">Las marcadas quedan <b>aprobadas</b>. Desmarca las que el cliente pidió cambiar.</p>' + pickHTML(lista, () => true) +
+    (g ? '' : '<label class="l">Las desmarcadas</label><select id="g-modo"><option value="cambios">Pidió cambios</option><option value="nada">Aún no responde por esas</option></select>') +
+    '<label class="l">¿Qué pidió cambiar? (se anota en cada una)</label><textarea id="g-nota" rows="2"></textarea>' +
+    (g ? '<p class="sub">Las desmarcadas vuelven a quien escribe como ajuste de copy (' + rondasCopy() + ' incluido' + (rondasCopy() === 1 ? '' : 's') + ' por guion).</p>' : '<p class="sub">Las que pidieron cambios vuelven a edición (' + rondasMax() + ' cambio' + (rondasMax() === 1 ? '' : 's') + ' incluido' + (rondasMax() === 1 ? '' : 's') + ' por video).</p>') +
+    '<div class="btns"><button class="btn" data-act="cerrar">Cancelar</button><button class="btn p" data-act="grupo-ok"><i class="ti ti-check"></i>Guardar</button></div>');
+}
+// Junta los cambios por tarea y los manda en un solo pedido
+async function patchTareas(lista) {
+  const porId = {}, orden = [];
+  lista.filter(x => x && x.id).forEach(x => { if (!porId[x.id]) { porId[x.id] = {}; orden.push(x.id); } Object.assign(porId[x.id], x.cambios); });
+  const ups = orden.map(id => {
+    const t = S.tareas.find(y => y.id === id), c = porId[id];
+    if (t && c.estado !== undefined) { if (c.estado === 'Listo' && t.estado !== 'Listo') c.fechaListo = S.hoy; else if (c.estado !== 'Listo' && t.estado === 'Listo') c.fechaListo = ''; }
+    if (t) Object.assign(t, c);
+    return Object.assign({ id }, c);
+  });
+  for (let i = 0; i < ups.length; i += 15) {
+    const parte = ups.slice(i, i + 15), r = await api('updateTareas', { d: { lista: parte } });
+    if (r.ok) continue;
+    if (!/no reconocida/i.test(r.error || '')) throw new Error(r.error);
+    for (const u of parte) { const r2 = await api('updateTarea', { d: u }); if (!r2.ok) throw new Error(r2.error); }   // Apps Script anterior: una por una
+  }
+}
+async function guardarGrupo() {
+  const G = grupoCtx; if (!G) return;
+  const vals = pickValores(), si = vals.filter(v => v.ok).map(v => v.pz), no = vals.filter(v => !v.ok).map(v => v.pz);
+  const modo = $('g-modo') ? $('g-modo').value : 'cambios', txt = ($('g-nota') ? $('g-nota').value : '').trim() || 'sin detalle';
+  const P = pz => G.lista.find(x => x.pz === pz).p, ups = [], up = (t, c) => { if (t) ups.push({ id: t.id, cambios: c }); }, sobre = [];
+  if (G.tipo === 'etapa') {
+    si.forEach(pz => { const p = P(pz), t = p[G.etapa]; up(t, { estado: 'Listo' });
+      if (G.etapa === 'edicion' && t.estado === 'Con cambios') { if (p.revvideo && p.revvideo.estado === 'Con cambios') up(p.revvideo, { estado: 'En revisión' }); if (p.calidad && p.calidad.estado === 'Con cambios') up(p.calidad, { estado: 'Pendiente', checklist: '' }); } });
+  } else if (G.tipo === 'calidad') {
+    const items = checklistItems().join('|');
+    si.forEach(pz => up(P(pz).calidad, { estado: 'Listo', checklist: items }));
+    if (modo === 'cambios') no.forEach(pz => { const p = P(pz); up(p.calidad, { estado: 'Con cambios', checklist: '', notas: nota(p.calidad, 'Calidad: ' + txt) }); up(p.edicion, { estado: 'Con cambios', notas: nota(p.edicion, 'Calidad: ' + txt) }); });
+  } else if (G.tipo === 'resp-guion') {
+    up(G.l.lote.aprobguion, { estado: 'Listo' });
+    no.forEach(pz => { const g = P(pz).guion, ronda = (parseInt(g.rondas) || 0) + 1; up(g, { estado: 'Con cambios', rondas: ronda, notas: nota(g, 'Ajuste de copy ' + ronda + ' (cliente): ' + txt) }); if (ronda > rondasCopy()) sobre.push({ pz, d: 'Guion ' + pz + ' (' + g.cliente + '): ajuste de copy ' + ronda + '. ' + txt }); });
+  } else if (G.tipo === 'resp-video') {
+    si.forEach(pz => up(P(pz).revvideo, { estado: 'Listo' }));
+    if (modo === 'cambios') no.forEach(pz => { const p = P(pz), rv = p.revvideo, ronda = (parseInt(rv.rondas) || 0) + 1, n = 'Ronda ' + ronda + ' (cliente): ' + txt; up(rv, { estado: 'Con cambios', rondas: ronda, notas: nota(rv, n) }); up(p.edicion, { estado: 'Con cambios', notas: nota(p.edicion, n) }); if (ronda > rondasMax()) sobre.push({ pz, d: 'Pieza ' + pz + ' (' + rv.cliente + '): ronda ' + ronda + ' de cambios. ' + txt }); });
+  }
+  if (!ups.length) { closeModal(); return; }
+  const extras = sobre.length && confirm((sobre.length === 1 ? 'La pieza ' + sobre[0].pz + ' supera' : 'Las piezas ' + sobre.map(x => x.pz).join(', ') + ' superan') + ' los cambios incluidos en el plan. Según la política se cotiza como extra. ¿Lo registro como pedido fuera del plan?');
+  closeModal();
+  await conSync(async () => { await patchTareas(ups); if (extras) { for (const x of sobre) await guardarExtra(x.d, 'Extra cotizado', G.cid); await cargar(); } });
+  grupoCtx = null;
 }
 
 // ═════════ PIEZAS ═════════
@@ -1089,6 +1259,7 @@ function vPiezas() {
   const vis = filas.filter(r => pFase ? r.f === pFase : !['Completada', 'Aprobado por el cliente'].includes(r.f));
   let h = '<div class="head"><h2>Piezas</h2><div class="row"><select data-filter="pc"><option value="">Todos los clientes</option>' + activos().map(c => '<option value="' + esc(c.id) + '" ' + (pCli === c.id ? 'selected' : '') + '>' + esc(c.nombre) + '</option>').join('') + '</select></div></div>';
   if (!filas.length) return h + '<div class="empty">Aún no hay piezas. Genera el lote de un cliente en <b>Clientes</b>.</div>';
+  h += cardRespuestas();
   h += '<div class="phase-chips" style="margin-bottom:12px"><button class="pchip ' + (!pFase ? 'on' : '') + '" data-act="fase" data-f="">En curso</button>' + FASES.filter(f => cuenta[f]).map(f => '<button class="pchip ' + (pFase === f ? 'on' : '') + '" data-act="fase" data-f="' + esc(f) + '">' + esc(f) + ' · ' + cuenta[f] + '</button>').join('') + '</div>';
   h += '<div class="card">' + (vis.length ? vis.slice(0, 80).map(filaPieza).join('') + (vis.length > 80 ? '<div class="sub" style="padding-top:8px">Mostrando 80 de ' + vis.length + '. Filtra por cliente o por fase.</div>' : '') : '<div class="empty">No hay piezas en esta fase</div>') + '</div>';
   return h;
@@ -1096,9 +1267,12 @@ function vPiezas() {
 
 // ═════════ CARGA ═════════
 function vCarga() {
-  const hm = S.hoy.slice(0, 7), sem = semanasVista(), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 1))), filas = cargaHoras(tareas, S.equipo, sem, true), so = sobrecargas(filas, sem);
+  const hm = S.hoy.slice(0, 7), sem = semanasVista(), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 1))), filas = cargaHoras(tareas, S.equipo, sem, true);
+  const resTr = sumarReservaTrafico({}, S.equipo, sem[0], addDays(sem[sem.length - 1], 6));
+  Object.keys(resTr).forEach(nm => { if (!filas[nm]) filas[nm] = sem.map(() => 0); Object.keys(resTr[nm]).forEach(f => { const i = Math.floor(diff(sem[0], lunes(f)) / 7); if (i >= 0 && i < sem.length) filas[nm][i] = Math.round((filas[nm][i] + resTr[nm][f]) * 10) / 10; }); });
+  const so = sobrecargas(filas, sem);
   let h = '<div class="head"><h2>Carga por persona</h2></div>';
-  h += '<p class="sub" style="margin-bottom:10px">Horas pendientes por semana frente a las horas reales de cada persona (se descuentan los feriados). Incluye lo comprometido aunque el lote no esté generado. Las atrasadas se cuentan en «Esta semana». Las tareas del cliente no cargan al equipo. Verde: dentro del ' + Math.round(umbral() * 100) + '% · Amarillo: justo · Naranja: no alcanza.</p>';
+  h += '<p class="sub" style="margin-bottom:10px">Horas pendientes por semana frente a las horas reales de cada persona (se descuentan los feriados). Incluye lo comprometido aunque el lote no esté generado. Las atrasadas se cuentan en «Esta semana». Las tareas del cliente no cargan al equipo. A quien lleva el tráfico se le suman sus horas de tráfico de cada semana. Verde: dentro del ' + Math.round(umbral() * 100) + '% · Amarillo: justo · Naranja: no alcanza.</p>';
   h += so.length ? '<div class="alert r"><b>Atención:</b><br>' + so.map(x => esc(x.n) + ': ' + x.tot + ' h la semana ' + (x.i === 0 ? 'actual' : 'del ' + dm(x.s)) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '<div class="alert g">Nadie se pasa de sus horas en las próximas 6 semanas.</div>';
   h += '<div class="card">' + tablaHoras(filas, sem, 'Esta semana') + '</div>';
   h += '<p class="sub">Las horas de cada persona y las horas por tarea se ajustan en <b>Ajustes</b>.</p>';
@@ -1528,7 +1702,16 @@ async function guardarTarea(id) {
   if ($('m-chk')) c.checklist = Array.from(document.querySelectorAll('#m-chk input:checked')).map(i => i.value).join('|');
   closeModal(); await conSync(() => patchTarea(id, c));
 }
-const rapido = (id, estado) => conSync(() => patchTarea(id, { estado }));
+// Listo en una edición que tenía cambios: la pieza vuelve a calidad o al cliente, igual que en la vista Piezas
+const rapido = (id, estado) => conSync(() => {
+  const t = S.tareas.find(x => x.id === id), ups = [{ id, cambios: { estado } }];
+  if (t && estado === 'Listo' && t.etapa === 'edicion' && t.estado === 'Con cambios' && t.pieza !== '0') {
+    const x = ctxPieza(t.clienteId, t.ciclo, t.pieza), p = x ? x.p : {};
+    if (p.revvideo && p.revvideo.estado === 'Con cambios') ups.push({ id: p.revvideo.id, cambios: { estado: 'En revisión' } });
+    if (p.calidad && p.calidad.estado === 'Con cambios') ups.push({ id: p.calidad.id, cambios: { estado: 'Pendiente', checklist: '' } });
+  }
+  return ups.length > 1 ? patchTareas(ups) : patchTarea(id, { estado });
+});
 const toggleChk = id => {
   const fila = Array.from(document.querySelectorAll('.qrow')).find(r => r.dataset.id === id); if (!fila) return Promise.resolve();
   const v = Array.from(fila.querySelectorAll('input[data-chk]:checked')).map(i => i.value).join('|');
@@ -1632,6 +1815,11 @@ document.addEventListener('click', e => {
   else if (a === 'cerrar') closeModal();
   else if (a === 'guardar-tarea') guardarTarea(id);
   else if (a === 'rapido') rapido(id, d.e);
+  else if (a === 'grupo') abrirGrupo(d.k, d.r);
+  else if (a === 'grupo-ver') { if (gruposAbiertos.has(d.k)) gruposAbiertos.delete(d.k); else gruposAbiertos.add(d.k); render(); }
+  else if (a === 'grupo-ok') guardarGrupo();
+  else if (a === 'respuesta') abrirRespuesta(d.cid, d.ciclo, d.t);
+  else if (a === 'pick-todas') document.querySelectorAll('#g-pick input').forEach(i => { if (!i.disabled) { i.checked = d.v === '1'; i.closest('label').classList.toggle('off', !i.checked); } });
   else if (a.indexOf('pz-') === 0) accionPieza(a, d.cid, d.ciclo, d.pz);
   else if (a === 'gen') abrirGen(id, d.ciclo);
   else if (a === 'gen-ok') confirmarGen();
@@ -1678,6 +1866,7 @@ document.addEventListener('change', e => {
   else if (t.id === 'le-piezas' || t.id === 'le-fecha' || (t.closest && t.closest('#le-incl'))) prevLoteExtra();
 });
 $('overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeModal(); });
+document.addEventListener('change', e => { const i = e.target; if (i && i.closest && i.closest('#g-pick')) i.closest('label').classList.toggle('off', !i.checked); });
 $('code').addEventListener('keydown', e => { if (e.key === 'Enter') entrar($('code').value.trim()); });
 
 // ═════════ INICIO ═════════
