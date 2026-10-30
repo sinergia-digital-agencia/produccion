@@ -397,6 +397,12 @@ function traficoSemanal(equipo, f) {
   return r;
 }
 function reservaDia(p, f, fer, sem) { const cap = horasDelDia(p, f, fer), base = capSemNom(p); return cap && base && sem ? Math.min(cap, sem * cap / base) : 0; }
+// Suma la reserva de tráfico a una tabla de horas por semana (filas[nombre][i], sem = lunes de cada semana)
+function sumarReservaSemanas(filas, sem) {
+  const resTr = sumarReservaTrafico({}, S.equipo, sem[0], addDays(sem[sem.length - 1], 6));
+  Object.keys(resTr).forEach(nm => { if (!filas[nm]) filas[nm] = sem.map(() => 0); Object.keys(resTr[nm]).forEach(f => { const i = Math.floor(diff(sem[0], lunes(f)) / 7); if (i >= 0 && i < sem.length) filas[nm][i] = Math.round((filas[nm][i] + resTr[nm][f]) * 10) / 10; }); });
+  return filas;
+}
 function sumarReservaTrafico(m, equipo, desde, hasta) {
   if (typeof S === 'undefined' || !S.hoy) return m;
   const fer = FER(), a = desde > addDays(S.hoy, -62) ? desde : addDays(S.hoy, -62), b = hasta < addDays(S.hoy, 400) ? hasta : addDays(S.hoy, 400);
@@ -1015,10 +1021,10 @@ function vDashboard() {
 
   const filasCap = cap.filter(x => x.cap > 0 && (x.demanda > 0 || x.margen !== null));
   h += '<div class="card"><h4 style="margin-bottom:4px">Ocupación del equipo en ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">Según las piezas que tienen contratadas los clientes activos y las horas reales de cada persona (lunes a sábado hasta el mediodía, sin feriados). Se planifica hasta el ' + Math.round(umbral() * 100) + '% para dejar espacio a correcciones e imprevistos. La edición y la calidad solo cuentan el <b>tramo</b> del ciclo en que de verdad trabajan: desde que llega el primer material hasta el tope, menos la reserva.</p><div class="scroll"><table class="tbl tb"><thead><tr><th>Persona</th><th>Horas disponibles</th><th>Lo que piden los clientes</th><th>Ocupación</th><th>Piezas más que caben</th></tr></thead><tbody>' +
-    filasCap.map(x => '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + x.cap + ' h' + (x.enVentana ? '<br><span class="sub">tramo ' + rango([ventanaDe(ym).ini, ventanaDe(ym).fin]) + '</span>' : '') + '</td><td>' + x.demanda + ' h</td><td style="min-width:130px"><div class="prog"><i style="width:' + Math.min(100, Math.round(x.pct * 100)) + '%;background:' + (x.pct > umbral() ? '#BF4F26' : '#28a745') + '"></i></div><span class="sub">' + Math.round(x.pct * 100) + '%</span></td><td>' + (x.margen === null ? '<span class="sub">—</span>' : '<b>' + x.margen + '</b>') + '</td></tr>').join('') + '</tbody></table></div></div>';
+    filasCap.map(x => '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + x.cap + ' h' + (x.enVentana ? '<br><span class="sub">tramo ' + rango([ventanaDe(ym).ini, ventanaDe(ym).fin]) + '</span>' : '') + '</td><td>' + x.demanda + ' h' + ((tr => tr ? '<br><span class="sub">de eso, ' + tr + ' h son tráfico</span>' : '')(Math.round((traficoSemanal(S.equipo, ym + '-15')[x.nombre] || 0) * finMes(ym) / 7 * 10) / 10)) + '</td><td style="min-width:130px"><div class="prog"><i style="width:' + Math.min(100, Math.round(x.pct * 100)) + '%;background:' + (x.pct > umbral() ? '#BF4F26' : '#28a745') + '"></i></div><span class="sub">' + Math.round(x.pct * 100) + '%</span></td><td>' + (x.margen === null ? '<span class="sub">—</span>' : '<b>' + x.margen + '</b>') + '</td></tr>').join('') + '</tbody></table></div></div>';
 
-  const sem = semanasDelMes(ym), filas = cargaHoras(tareasMes, S.equipo, sem, false), so = sobrecargas(filas, sem);
-  h += '<div class="card"><h4 style="margin-bottom:4px">Horas planificadas por semana</h4>' + (so.length ? '<div class="alert r" style="margin:8px 0">' + so.map(x => '<b>' + esc(x.n) + '</b>: ' + x.tot + ' h la semana del ' + dm(x.s) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '') + tablaHoras(filas, sem, '') + '</div>';
+  const sem = semanasDelMes(ym), filas = sumarReservaSemanas(cargaHoras(tareasMes, S.equipo, sem, false), sem), so = sobrecargas(filas, sem);
+  h += '<div class="card"><h4 style="margin-bottom:4px">Horas planificadas por semana</h4><p class="sub" style="margin-bottom:8px">Tareas de cada semana más, para quien lleva el tráfico, sus horas de tráfico.</p>' + (so.length ? '<div class="alert r" style="margin:8px 0">' + so.map(x => '<b>' + esc(x.n) + '</b>: ' + x.tot + ' h la semana del ' + dm(x.s) + ' (tiene ' + x.cap + ' h)').join('<br>') + '</div>' : '') + tablaHoras(filas, sem, '') + '</div>';
 
   const ex = S.extras.filter(x => String(x.fecha).slice(0, 7) === ym);
   h += '<div class="card"><h4 style="margin-bottom:8px">Pedidos fuera del plan (' + ex.length + ')</h4>' + (ex.length ? ex.map(x => '<div class="row" style="border-bottom:1px solid var(--border);padding:6px 0"><span class="badge b-cambios">' + esc(x.tipo) + '</span><b>' + esc(x.cliente) + '</b><span class="sub">' + dm(x.fecha) + ' · ' + esc(x.descripcion) + '</span></div>').join('') : '<div class="empty">Ninguno este mes</div>') + '</div>';
@@ -1305,8 +1311,7 @@ function vPiezas() {
 // ═════════ CARGA ═════════
 function vCarga() {
   const hm = S.hoy.slice(0, 7), sem = semanasVista(), tareas = S.tareas.concat(proyeccion(hm, mesAdd(hm, 1))), filas = cargaHoras(tareas, S.equipo, sem, true);
-  const resTr = sumarReservaTrafico({}, S.equipo, sem[0], addDays(sem[sem.length - 1], 6));
-  Object.keys(resTr).forEach(nm => { if (!filas[nm]) filas[nm] = sem.map(() => 0); Object.keys(resTr[nm]).forEach(f => { const i = Math.floor(diff(sem[0], lunes(f)) / 7); if (i >= 0 && i < sem.length) filas[nm][i] = Math.round((filas[nm][i] + resTr[nm][f]) * 10) / 10; }); });
+  sumarReservaSemanas(filas, sem);
   const so = sobrecargas(filas, sem);
   let h = '<div class="head"><h2>Carga por persona</h2></div>';
   h += '<p class="sub" style="margin-bottom:10px">Horas pendientes por semana frente a las horas reales de cada persona (se descuentan los feriados). Incluye lo comprometido aunque el lote no esté generado. Las atrasadas se cuentan en «Esta semana». Las tareas del cliente no cargan al equipo. A quien lleva el tráfico se le suman sus horas de tráfico de cada semana. Verde: dentro del ' + Math.round(umbral() * 100) + '% · Amarillo: justo · Naranja: no alcanza.</p>';
