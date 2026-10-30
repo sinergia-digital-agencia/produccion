@@ -602,6 +602,17 @@ const capSem = (n, lun) => capSemana(persona(n), lun, FER());
 const checklistItems = () => String(S.config.checklist || '').split('|').map(s => s.trim()).filter(Boolean);
 const marcados = t => String(t.checklist || '').split('|').filter(Boolean);
 const activos = () => S.clientes.filter(c => c.estado === 'Activo');
+// Plan contratado por mes: cada ciclo del CRM trae piezas, guiones y servicios, y desde qué mes de producción aplica.
+// Para el mes ym se usa el último ciclo que ya aplica; sin ciclos con plan, lo de la ficha del CRM.
+const planDe = (c, ym) => {
+  const f = c._ficha || { piezas: c.piezas, guiones: c.guiones, incluye: c.incluye }, ps = c.planes || [];
+  let r = null; ps.forEach(p => { if (!p.desde || p.desde <= ym) r = p; });
+  return r ? { piezas: r.piezas, guiones: r.guiones, incluye: (r.incluye && r.incluye.length) ? r.incluye : f.incluye } : f;
+};
+const cm = (c, ym) => c ? Object.assign({}, c, { _ficha: c._ficha || { piezas: c.piezas, guiones: c.guiones, incluye: c.incluye } }, ym ? planDe(c, ym) : {}) : c;
+const tienePiezas = c => (c._ficha ? c._ficha.piezas : c.piezas) > 0 || (c.planes || []).some(p => p.piezas > 0);
+// Si cambia el plan en un mes posterior, para avisarlo en la tarjeta
+const cambioPlan = (c, ym) => { const a = planDe(c, ym); for (let i = 1; i <= 3; i++) { const m = mesAdd(ym, i), b = planDe(c, m); if (b.piezas !== a.piezas) return { m, piezas: b.piezas }; } return null; };
 const nombreRol = rol => asignar(rol, S.equipo) || '';
 const semanasVista = () => [0, 1, 2, 3, 4, 5].map(i => addDays(lunes(S.hoy), i * 7));
 function semanasDelMes(ym) { const w = []; let s = lunes(ym + '-01'); const fin = ym + '-' + pad(finMes(ym)); while (s <= fin) { w.push(s); s = addDays(s, 7); } return w; }
@@ -646,6 +657,7 @@ function fijasDe(c, ym, prom) {
   return (s < m && m < prom) ? { envio: s, material: m } : null;
 }
 function paramsPromesa(c, ym, j, prom, inv) {
+  c = cm(c, ym);
   const cr = cronoDe(c.id), fer = FER();
   return { fijas: fijasDe(c, ym, prom), grabHoras: cr.grabHoras || null, entrega: prom ? addLab(prevLab(prom, fer), -colchon(), fer) : '', tanda: j, tandas: Math.max(1, cr.entregas.length), piezas: c.piezas, incluye: incluyeDe(c), etapas: S.etapas, equipo: S.equipo, fer, diasAprob: cr.diasAprob || diasAprob(), diasGrab: cr.diasGrab || diasGrab(), investigacion: !!inv && j === 1, asig: Object.assign({ onboarding: onboardingDe(c) }, cr.asig), fechaOnb: (!!inv && j === 1 && cr.onboarding) ? cr.onboarding : null, invDias: diasInv(), cierre: esCierre(c, ym, j), coautor: cr.coautor && cr.coautorPiezas ? { persona: S.equipo.find(x => x.id === cr.coautor) || null, piezas: cr.coautorPiezas } : null };
 }
@@ -667,9 +679,10 @@ function proyeccion(ymIni, ymFin, opts) {
   // en orden de entrega, cada lote se acomoda alrededor de lo real y de los lotes proyectados antes que él
   const ls = lotes(S.tareas), cand = [], out = [];
   activos().forEach(c => {
-    const cr = cronoDe(c.id); if (!cr.entregas.length || !c.piezas) return;
+    const cr = cronoDe(c.id); if (!cr.entregas.length || !tienePiezas(c)) return;
     for (let m = ymIni; m <= ymFin; m = mesAdd(m, 1)) for (let j = 1; j <= cr.entregas.length; j++) {
       const id = m + '-' + j; if (ls.some(l => l.clienteId === c.id && l.ciclo === id)) continue;
+      if (!cm(c, m).piezas) continue;
       if (!loteValido(c, m, j)) continue;
       cand.push({ c, id, e: paramsLote(c, id, false).entrega });
     }
@@ -683,7 +696,7 @@ function proyeccion(ymIni, ymFin, opts) {
   return out;
 }
 // Capacidad del mes según los clientes que tienen entrega ese mes (respeta primera y última entrega)
-const itemsCapacidad = ym => activos().filter(c => c.piezas > 0).map(c => {
+const itemsCapacidad = ym => activos().map(c => cm(c, ym)).filter(c => c.piezas > 0).map(c => {
   const cr = cronoDe(c.id), p2 = S.equipo.find(x => x.id === cr.coautor); let n = 0;
   for (let j = 1; j <= cr.entregas.length; j++) if (loteValido(c, ym, j)) n++;
   return n ? { grabHoras: cr.grabHoras, traficoMes: Math.round(cr.traficoHSem * finMes(ym) / 7 * 10) / 10, piezas: c.piezas, tandas: n, incluye: incluyeDe(c), asig: cr.asig, coautor: p2 && cr.coautorPiezas ? { nombre: p2.nombre, piezas: cr.coautorPiezas } : null } : null;
@@ -712,7 +725,7 @@ const cronoFila = id => { const r = S.cronograma.find(x => x.clienteId === id) |
 // Plan del mes: propone la entrega de cada cliente para que Juan Pablo edite en fila y todo quede listo antes del tope
 function planDelMes(ym) {
   const fer = FER(), tope = topeDe(ym), ls = lotes(S.tareas), excl = new Set(), items = [], fuera = [], clis = [];
-  activos().forEach(c => {
+  activos().map(c => cm(c, ym)).forEach(c => {
     if (!c.piezas) return;
     const inc = incluyeDe(c); if (!inc.some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0)) return;
     const cr = cronoDe(c.id);
@@ -790,7 +803,7 @@ async function api(action, params) {
   const r = await fetch(u.toString());
   return r.json();
 }
-const APP_VERSION = '2026-10-29 · sesión de grabación y plazos de aprobación';
+const APP_VERSION = '2026-10-30 · plan por ciclo desde el CRM';
 async function cargar() {
   setSync('sync', 'Sincronizando…');
   const r = await api('getAll');
@@ -912,7 +925,7 @@ function vDashboard() {
   const al = [], tareasMes = S.tareas.concat(ym >= hm ? proyeccion(ym, ym) : []);
   const dc = diasCargados(cargaDiaria(tareasMes, S.equipo, ym + '-01', ym + '-' + pad(finMes(ym)), false), S.equipo, FER(), TOL).filter(x => x.sobre);
   if (dc.length) al.push('<b>Hay días con más trabajo del que alguien puede hacer</b> (revisa el Tablero):<br>' + dc.slice(0, 4).map(x => esc(x.persona) + ': ' + x.horas + ' h el ' + dm(x.fecha) + ' (tiene ' + x.cap + ' h)').join('<br>') + (dc.length > 4 ? '<br>… y ' + (dc.length - 4) + ' más' : ''));
-  const sinFecha = activos().filter(c => c.piezas > 0 && !cronoDe(c.id).entregas.length);
+  const sinFecha = activos().filter(c => tienePiezas(c) && !cronoDe(c.id).entregas.length);
   if (sinFecha.length) al.push('Sin fecha de entrega: <b>' + sinFecha.map(c => esc(c.nombre)).join(', ') + '</b>. Defínela en <b>Clientes → Fechas y reglas</b>.');
   const sinResp = S.tareas.filter(t => LOTE_RE.test(t.ciclo) && t.estado !== 'Listo' && !t.responsable);
   if (sinResp.length) al.push(sinResp.length + ' tareas sin responsable (' + [...new Set(sinResp.map(t => t.etapaNombre))].slice(0, 3).map(esc).join(', ') + '). Asigna ese rol a alguien en <b>Ajustes</b>.');
@@ -922,7 +935,7 @@ function vDashboard() {
     al.push('<b>' + esc(loteLabel(l)) + '</b>: ' + n + ' tarea' + (n > 1 ? 's' : '') + ' del cliente atrasada' + (n > 1 ? 's' : '') + ' (' + dh + ' día' + (dh === 1 ? '' : 's') + ' hábil' + (dh === 1 ? '' : 'es') + ' sin respuesta; a los ' + tac + ' se da por aprobado, según la política). Con «Retraso del cliente» (en Clientes) se mueve solo su entrega, nunca la de los demás.');
   });
   const tent = [];
-  activos().forEach(c => { const cr = cronoDe(c.id); if (!c.piezas || !cr.entregas.length) return; [hm, mesAdd(hm, 1)].forEach(m => { for (let j = 1; j <= cr.entregas.length; j++) if (loteValido(c, m, j) && tentativo(c, promesa(c, m, j)) && tent.indexOf(c.nombre) < 0) tent.push(c.nombre); }); });
+  activos().forEach(c => { const cr = cronoDe(c.id); if (!tienePiezas(c) || !cr.entregas.length) return; [hm, mesAdd(hm, 1)].forEach(m => { for (let j = 1; j <= cr.entregas.length; j++) if (loteValido(c, m, j) && tentativo(c, promesa(c, m, j)) && tent.indexOf(c.nombre) < 0) tent.push(c.nombre); }); });
   if (tent.length) al.push('Renovación pendiente en el CRM: <b>' + tent.map(esc).join(', ') + '</b> (su próxima entrega cae después de lo que tienen registrado). Si renuevan, actualiza el CRM; si no renuevan, pon su «Última entrega» en Clientes y se libera su capacidad.');
   const ina = {}; todos.forEach(l => { if (activos().some(c => c.id === l.clienteId)) return; const k = l.tareas.filter(t => t.estado !== 'Listo').length; if (k) ina[l.cliente] = (ina[l.cliente] || 0) + k; });
   if (Object.keys(ina).length) al.push('Ya no están activos en el CRM pero tienen tareas pendientes: <b>' + Object.keys(ina).map(k => esc(k) + ' (' + ina[k] + ')').join(', ') + '</b>. Bórralas en <b>Ajustes</b>.');
@@ -986,13 +999,13 @@ function vTablero() {
     }).join('') + '</tbody></table></div><p class="sub" style="margin-top:8px">Pasa el cursor (o toca) sobre una celda para ver qué clientes y etapas son.</p></div>';
 
   const filas = [];
-  activos().forEach(c => { const cr = cronoDe(c.id); if (!c.piezas || !cr.entregas.length) return; for (let j = 1; j <= cr.entregas.length; j++) { if (!loteValido(c, ym, j)) continue; const id = ym + '-' + j, pl = datosLote(c, id), ll = lotes(S.tareas).find(x => x.clienteId === c.id && x.ciclo === id); if (pl) filas.push({ nombre: c.nombre + (cr.entregas.length > 1 ? ', entrega ' + j : ''), pl, n: ll ? ll.n : piezasTanda(c.piezas, cr.entregas.length, j) }); } });
+  activos().map(c => cm(c, ym)).forEach(c => { const cr = cronoDe(c.id); if (!c.piezas || !cr.entregas.length) return; for (let j = 1; j <= cr.entregas.length; j++) { if (!loteValido(c, ym, j)) continue; const id = ym + '-' + j, pl = datosLote(c, id), ll = lotes(S.tareas).find(x => x.clienteId === c.id && x.ciclo === id); if (pl) filas.push({ nombre: c.nombre + (cr.entregas.length > 1 ? ', entrega ' + j : ''), pl, n: ll ? ll.n : piezasTanda(c.piezas, cr.entregas.length, j) }); } });
   filas.sort((a, b) => a.pl.entrega.localeCompare(b.pl.entrega));
   h += '<div class="card"><h4 style="margin-bottom:4px">Fechas de cada cliente · ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">La fecha de entrega es fija (por contrato). Todo lo anterior se calcula hacia atrás con las horas de cada persona y el calendario real. Sirven para el anexo del contrato.</p>' +
     (filas.length ? '<div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>Piezas</th><th>Escribe</th><th>Envía guiones</th><th>Cliente aprueba</th><th>Cliente graba</th><th>Edita</th><th>Entrega</th><th>Cliente revisa</th></tr></thead><tbody>' +
       filas.map(f => '<tr><td><b>' + esc(f.nombre) + '</b></td><td>' + f.n + '</td><td>' + rango(f.pl.wr ? [f.pl.wr.ini, f.pl.wr.fin] : null) + '</td><td>' + (f.pl.envio ? dm(f.pl.envio) : '—') + '</td><td>' + rango(f.pl.aprueba) + '</td><td>' + rango(f.pl.grab) + '</td><td>' + rango(f.pl.ed ? [f.pl.ed.ini, f.pl.ed.fin] : null) + '</td><td><b>' + dm(f.pl.entrega) + '</b></td><td>' + rango(f.pl.revision) + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="empty">Ningún cliente tiene fecha de entrega. Defínelas en <b>Clientes</b>.</div>') + '</div>';
   const f3 = [];
-  activos().forEach(c => { const cr = cronoDe(c.id); if (!c.piezas || !cr.entregas.length) return; for (let j = 1; j <= cr.entregas.length; j++) { if (!loteValido(c, ym, j)) continue; const id = ym + '-' + j, f = fechas3(c, id); if (f) f3.push({ c, id, f, nombre: c.nombre + (cr.entregas.length > 1 ? ', entrega ' + j : ''), tent: tentativo(c, promesa(c, ym, j)), cierre: esCierre(c, ym, j) }); } });
+  activos().map(c => cm(c, ym)).forEach(c => { const cr = cronoDe(c.id); if (!c.piezas || !cr.entregas.length) return; for (let j = 1; j <= cr.entregas.length; j++) { if (!loteValido(c, ym, j)) continue; const id = ym + '-' + j, f = fechas3(c, id); if (f) f3.push({ c, id, f, nombre: c.nombre + (cr.entregas.length > 1 ? ', entrega ' + j : ''), tent: tentativo(c, promesa(c, ym, j)), cierre: esCierre(c, ym, j) }); } });
   f3.sort((x, y) => (x.f.editado || x.f.guiones || '').localeCompare(y.f.editado || y.f.guiones || ''));
   h += '<div class="card"><h4 style="margin-bottom:4px">Fechas para compartir con el cliente · ' + mesLabel(ym) + '</h4><p class="sub" style="margin-bottom:8px">Solo lo que el cliente necesita saber: cuándo recibe los guiones, cuándo debe entregar el material y cuándo recibe su contenido editado. La entrega ya incluye el colchón de ' + colchon() + ' día' + (colchon() === 1 ? '' : 's') + '. Lo demás es interno.</p>' +
     (f3.length ? '<div class="scroll"><table class="tbl tb"><thead><tr><th>Cliente</th><th>1 · Recibe los guiones</th><th>2 · Entrega el material</th><th>3 · Recibe lo editado</th><th></th></tr></thead><tbody>' + f3.map(x => '<tr><td><b>' + esc(x.nombre) + '</b>' + (x.tent ? ' <span class="badge b-warn">Renovación pendiente</span>' : '') + (x.cierre ? ' <span class="badge b-pend">Último lote</span>' : '') + '</td><td>' + (x.f.guiones ? corta(x.f.guiones) : '—') + '</td><td>' + (x.f.tieneEdicion ? (x.f.conGrab ? (x.f.grab ? rango(x.f.grab) + ' <span class="sub">(grabamos nosotros)</span>' : '—') : (x.f.material ? corta(x.f.material) : '—')) : '—') + '</td><td>' + (x.f.editado ? '<b>' + corta(x.f.editado) + '</b>' : '—') + '</td><td><button class="btn sm" data-act="mensaje" data-id="' + esc(x.c.id) + '" data-ciclo="' + x.id + '"><i class="ti ti-message-2"></i>Mensaje</button></td></tr>').join('') + '</tbody></table></div>' : '<div class="empty">Ningún cliente tiene entrega este mes</div>') + '</div>';
@@ -1100,19 +1113,19 @@ function mesesDe(c) {
   return Object.keys(set).sort();
 }
 function vClientes() {
-  const cl = activos(), ls = lotes(S.tareas), hm = mesInicial();
+  const hm = mesInicial(), cl = activos().map(c => cm(c, hm)), ls = lotes(S.tareas);
   let h = '<div class="head"><h2>Clientes activos</h2><div class="row"><button class="btn sm p" data-act="gen-mes" data-m="' + hm + '"><i class="ti ti-wand"></i>Generar lotes de ' + MESES_L[+hm.slice(5, 7) - 1] + '</button><button class="btn sm" data-act="gen-mes" data-m="' + mesAdd(hm, 1) + '"><i class="ti ti-wand"></i>' + MESES_L[+mesAdd(hm, 1).slice(5, 7) - 1] + '</button></div></div><p class="sub" style="margin-bottom:10px">Piezas, servicios y renovaciones vienen del CRM; las fechas de entrega, de aquí. Cada cliente recibe todo lo contratado en una sola entrega al mes. Cada lote se acomoda en los huecos que dejan los demás.</p>';
   if (!cl.length) return h + '<div class="empty">No hay clientes activos en el CRM</div>';
   h += '<div class="grid2">' + cl.map(c => {
     const cr = cronoDe(c.id), tn = tandasCli(c), contenido = incluyeDe(c).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0), sh = servicioHasta(c);
     let cuerpo = '';
-    if (!c.piezas) cuerpo = '<div class="alert w" style="margin:10px 0 0">Falta cargar las piezas por mes en el CRM (Editar cliente).</div>';
+    if (!tienePiezas(c)) cuerpo = '<div class="alert w" style="margin:10px 0 0">Falta cargar las piezas por mes en el CRM (Editar cliente).</div>';
     else if (!contenido) cuerpo = '<div class="alert i" style="margin:10px 0 0">No incluye guion, grabación ni edición: no genera lotes de contenido.</div>';
     else if (!cr.entregas.length) cuerpo = '<div class="alert w" style="margin:10px 0 0">Sin fecha de entrega. Defínela en «Fechas y reglas».</div>';
     else {
       cuerpo = mesesDe(c).map(m => { let s = ''; for (let j = 1; j <= tn; j++) {
         if (!loteValido(c, m, j) && !ls.some(x => x.clienteId === c.id && x.ciclo === m + '-' + j)) continue;
-        const id = m + '-' + j, l = ls.find(x => x.clienteId === c.id && x.ciclo === id), pl = datosLote(c, id), n = piezasTanda(c.piezas, tn, j), f3 = fechas3(c, id), tent = tentativo(c, promesa(c, m, j)), cierre = esCierre(c, m, j), ec = f3 && (f3.editado || f3.guiones);
+        const id = m + '-' + j, l = ls.find(x => x.clienteId === c.id && x.ciclo === id), pl = datosLote(c, id), n = piezasTanda(cm(c, m).piezas, tn, j), f3 = fechas3(c, id), tent = tentativo(c, promesa(c, m, j)), cierre = esCierre(c, m, j), ec = f3 && (f3.editado || f3.guiones);
         s += '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>' + mesLabel(m) + (tn > 1 ? ' · entrega ' + j : '') + '</b><span class="sub">' + n + ' piezas</span></div>' +
           ((tent || cierre) ? '<div class="row" style="gap:4px;margin:2px 0">' + (tent ? '<span class="badge b-warn">Renovación pendiente</span>' : '') + (cierre ? '<span class="badge b-pend">Último lote · incluye cierre ordenado</span>' : '') + '</div>' : '') +
           (pl ? '<div class="sub">' + (pl.wr ? 'Escribe ' + rango([pl.wr.ini, pl.wr.fin]) + ' · ' : '') + (pl.ed ? 'edita ' + rango([pl.ed.ini, pl.ed.fin]) + ' · ' : '') + 'entrega el <b>' + dm(ec || pl.entrega) + '</b>' + (colchon() && f3 && f3.editado ? ' <span class="sub">(meta interna ' + dm(pl.entrega) + ')</span>' : '') + '</div>' : '');
@@ -1125,14 +1138,14 @@ function vClientes() {
       cuerpo += ls.filter(l => l.clienteId === c.id && +l.ciclo.split('-')[2] >= 90).sort((a, b) => fechaEntrega(a).localeCompare(fechaEntrega(b))).map(l => { const hechas = l.tareas.filter(t => t.estado === 'Listo').length; return '<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px"><div class="row" style="justify-content:space-between"><b>Lote extra · entrega ' + dm(fechaEntrega(l)) + '</b><span class="sub">' + l.n + ' piezas</span></div><div class="prog"><i style="width:' + Math.round(hechas / l.tareas.length * 100) + '%"></i></div><div class="sub">' + hechas + ' de ' + l.tareas.length + ' tareas listas</div><div class="row" style="margin-top:6px"><button class="btn sm" data-act="retraso" data-id="' + esc(c.id) + '" data-ciclo="' + l.ciclo + '"><i class="ti ti-clock-pause"></i>Retraso del cliente</button><button class="btn sm d" data-act="borrarlote" data-id="' + esc(c.id) + '" data-ciclo="' + l.ciclo + '"><i class="ti ti-trash"></i></button></div></div>'; }).join('');
     }
     const nx = S.extras.filter(x => x.clienteId === c.id && String(x.fecha).slice(0, 7) === hm).length, p2 = S.equipo.find(x => x.id === cr.coautor), asg = Object.keys(cr.asig).map(k => { const ps = String(cr.asig[k]).split('+').map(i => S.equipo.find(x => x.id === i)).filter(Boolean); return ps.length ? k + ': ' + ps.map(p => p.nombre).join(' + ') : ''; }).filter(Boolean).join(' · ');
-    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="fechas" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Fechas y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span>' + (cr.entregas.length ? '<span class="badge b-listo">' + (cr.dGuiones && cr.dMaterial && cr.entregas.length === 1 ? 'Guiones ' + cr.dGuiones + ' · ' + (incluyeDe(c).includes('grabacion') ? 'Grabamos ' : 'Material ') + cr.dMaterial + ' · Entrega ' + cr.entregas[0] : 'Entrega el ' + cr.entregas.join(' y ') + ' (guiones y material automáticos)') + '</span>' : '') + (cr.primera && cr.primera > S.hoy ? '<span class="badge b-rev">Empieza el ' + dm(cr.primera) + '</span>' : '') + (cr.ultima ? '<span class="badge b-pend">Última entrega ' + dm(cr.ultima) + '</span>' : '') + (cr.graba ? '<span class="badge b-azul">' + (cr.graba === 'sinergia' ? 'Graba Sinergia' : 'Graba el cliente') + '</span>' : '') + (cr.prio ? '<span class="badge b-rev">Prioridad ' + cr.prio + '</span>' : '') + (cr.traficoHSem ? '<span class="badge b-azul">Tráfico ' + cr.traficoHSem + ' h/sem</span>' : '') + '</div>' +
+    return '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><b style="font-size:15px">' + esc(c.nombre) + '</b><button class="btn sm" data-act="fechas" data-id="' + esc(c.id) + '"><i class="ti ti-adjustments"></i>Fechas y reglas</button></div><div class="sub" style="margin:4px 0 8px">' + esc(incluyeLabel(c)) + '</div><div class="row"><span class="badge b-azul">' + c.piezas + ' piezas/mes</span>' + ((cp => cp ? '<span class="badge b-rev">' + cp.piezas + ' piezas desde ' + mesLabel(cp.m) + '</span>' : '')(cambioPlan(c, hm))) + (cr.entregas.length ? '<span class="badge b-listo">' + (cr.dGuiones && cr.dMaterial && cr.entregas.length === 1 ? 'Guiones ' + cr.dGuiones + ' · ' + (incluyeDe(c).includes('grabacion') ? 'Grabamos ' : 'Material ') + cr.dMaterial + ' · Entrega ' + cr.entregas[0] : 'Entrega el ' + cr.entregas.join(' y ') + ' (guiones y material automáticos)') + '</span>' : '') + (cr.primera && cr.primera > S.hoy ? '<span class="badge b-rev">Empieza el ' + dm(cr.primera) + '</span>' : '') + (cr.ultima ? '<span class="badge b-pend">Última entrega ' + dm(cr.ultima) + '</span>' : '') + (cr.graba ? '<span class="badge b-azul">' + (cr.graba === 'sinergia' ? 'Graba Sinergia' : 'Graba el cliente') + '</span>' : '') + (cr.prio ? '<span class="badge b-rev">Prioridad ' + cr.prio + '</span>' : '') + (cr.traficoHSem ? '<span class="badge b-azul">Tráfico ' + cr.traficoHSem + ' h/sem</span>' : '') + '</div>' +
       (sh ? '<div class="sub" style="margin-top:6px">Servicio registrado en el CRM hasta el ' + dm(sh) + '</div>' : '') + (cr.aprobador ? '<div class="sub" style="margin-top:4px">Aprueba: ' + esc(cr.aprobador) + '</div>' : '') + (p2 && cr.coautorPiezas ? '<div class="sub" style="margin-top:4px">' + esc(p2.nombre) + ' escribe ' + cr.coautorPiezas + ' guion' + (cr.coautorPiezas > 1 ? 'es' : '') + ' por entrega</div>' : '') + (asg ? '<div class="sub" style="margin-top:4px">Asignado: ' + esc(asg) + '</div>' : '') + ((cr.diasAprob || cr.diasGrab) ? '<div class="sub" style="margin-top:4px">' + (cr.diasAprob ? 'Aprueba en ' + cr.diasAprob + ' días' : '') + (cr.diasAprob && cr.diasGrab ? ' · ' : '') + (cr.diasGrab ? 'graba en ' + cr.diasGrab + ' días' : '') + '</div>' : '') + cuerpo +
       '<div class="row" style="margin-top:12px;justify-content:space-between;border-top:1px solid var(--border);padding-top:10px"><span class="sub">Pedidos fuera del plan este mes: ' + nx + '</span><div class="row"><button class="btn sm" data-act="extra" data-id="' + esc(c.id) + '"><i class="ti ti-plus"></i>Registrar pedido</button><button class="btn sm" data-act="lote-extra" data-id="' + esc(c.id) + '"><i class="ti ti-package"></i>Lote extra</button></div></div></div>';
   }).join('') + '</div>';
   return h;
 }
 function abrirGen(id, loteId) {
-  const c = S.clientes.find(x => x.id === id); if (!c) return;
+  const c = cm(S.clientes.find(x => x.id === id), loteId.slice(0, 7)); if (!c) return;
   genCtx = { id, loteId };
   const primero = !lotes(S.tareas).some(l => l.clienteId === id), plan = planLote(c, loteId, false), ini = plan.map(t => t.fecha).sort()[0] || S.hoy, pl = infoLote(c, loteId).plan, j = +loteId.split('-')[2];
   openModal('<h3>Lote · ' + esc(c.nombre) + '</h3><div class="sub">' + mesLabel(loteId.slice(0, 7)) + (tandasCli(c) > 1 ? ' · entrega ' + j : '') + ' · ' + piezasTanda(c.piezas, tandasCli(c), j) + ' piezas' + (pl ? ' · entrega el ' + dm(pl.entrega) : '') + '</div>' +
@@ -1162,7 +1175,7 @@ async function confirmarGen() {
 }
 async function genMes(ym) {
   const ls = lotes(S.tareas), pend = [];
-  activos().forEach(c => { const cr = cronoDe(c.id); if (!cr.entregas.length || !c.piezas || !(c.incluye || []).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0)) return; for (let j = 1; j <= cr.entregas.length; j++) { const id = ym + '-' + j; if (loteValido(c, ym, j) && !ls.some(l => l.clienteId === c.id && l.ciclo === id)) pend.push({ c, id, e: paramsLote(c, id, false).entrega }); } });
+  activos().map(c => cm(c, ym)).forEach(c => { const cr = cronoDe(c.id); if (!cr.entregas.length || !c.piezas || !(c.incluye || []).some(k => ['guion', 'grabacion', 'edicion'].indexOf(k) >= 0)) return; for (let j = 1; j <= cr.entregas.length; j++) { const id = ym + '-' + j; if (loteValido(c, ym, j) && !ls.some(l => l.clienteId === c.id && l.ciclo === id)) pend.push({ c, id, e: paramsLote(c, id, false).entrega }); } });
   if (!pend.length) { alert('Todos los lotes de ' + mesLabel(ym) + ' ya están generados.'); return; }
   pend.sort((a, b) => a.e.localeCompare(b.e));
   if (!confirm('Se generarán ' + pend.length + ' lote' + (pend.length > 1 ? 's' : '') + ' de ' + mesLabel(ym) + ', en orden de entrega, acomodando cada uno en los huecos que dejan los demás. Se dan por hechas las tareas anteriores a hoy. No incluye la investigación inicial (para un cliente nuevo, genera su primer lote desde su tarjeta). ¿Continuar?')) return;
@@ -1196,7 +1209,7 @@ async function confirmarRetraso() {
   loading(false);
 }
 function abrirFechas(id) {
-  const c = S.clientes.find(x => x.id === id); if (!c) return;
+  const c = cm(S.clientes.find(x => x.id === id), mesInicial()); if (!c) return;
   const cr = cronoDe(id); ctxCli = id;
   const personas = S.equipo.filter(p => p.activo !== 'NO'), chkAsig = (rol, etiqueta) => '<div><label class="l">' + etiqueta + '</label><div id="f-asig-' + rol + '" class="check-grid">' + personas.map(p => '<label><input type="checkbox" value="' + esc(p.id) + '" ' + (String(cr.asig[rol] || '').split('+').indexOf(p.id) >= 0 ? 'checked' : '') + '> ' + esc(p.nombre) + '</label>').join('') + '</div></div>', selAsig = rol => '<div><label class="l">' + ({ guion: 'Guiones', grabacion: 'Grabación', edicion: 'Edición', calidad: 'Calidad' })[rol] + '</label><select id="f-asig-' + rol + '"><option value="">Automático</option>' + personas.map(p => '<option value="' + esc(p.id) + '" ' + (cr.asig[rol] === p.id ? 'selected' : '') + '>' + esc(p.nombre) + '</option>').join('') + '</select></div>';
   openModal('<h3>Fechas y reglas · ' + esc(c.nombre) + '</h3><div class="sub">' + c.piezas + ' piezas al mes, todas en una sola entrega</div>' +
@@ -1217,7 +1230,7 @@ const MAX_DIA = 31;
 function ymFechas() { const hm = S.hoy.slice(0, 7); return desdeMes() && desdeMes() > hm ? desdeMes() : hm; }
 // Muestra en vivo si las 3 fechas alcanzan (en días hábiles) y qué pondría el sistema solo
 function evalFechasUI() {
-  const box = $('f-eval'), c = S.clientes.find(x => x.id === ctxCli); if (!box || !c) return;
+  const box = $('f-eval'), c = cm(S.clientes.find(x => x.id === ctxCli), ymFechas()); if (!box || !c) return;
   const dE = parseInt($('f-entregas').value), dG = parseInt($('f-dgui').value) || 0, dM = parseInt($('f-dmat').value) || 0, ym = ymFechas();
   if (!(dE >= 1 && dE <= MAX_DIA) || String($('f-entregas').value).indexOf(',') >= 0) { box.className = 'alert i'; box.innerHTML = 'Pon el día de entrega (un solo día) y te digo qué fechas alcanzan.'; return; }
   const r = evaluarFechas(c, ym, dG, dM, dE), n = r.nat; if (!n) { box.innerHTML = ''; return; }
